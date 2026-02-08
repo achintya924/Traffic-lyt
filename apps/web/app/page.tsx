@@ -41,6 +41,9 @@ export default function Home() {
       <p style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: '#94a3b8' }}>
         API base: <code>{API_BASE}</code>
       </p>
+      <p style={{ marginTop: '0.75rem', fontSize: '0.875rem' }}>
+        <a href="/map" style={{ color: '#38bdf8' }}>View violations map →</a>
+      </p>
 
       {fetchError && (
         <div className="status err" style={{ marginTop: '1rem' }}>

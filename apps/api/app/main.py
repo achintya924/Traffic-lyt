@@ -1,7 +1,7 @@
 import os
 from contextlib import contextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
@@ -65,3 +65,45 @@ def db_check():
         return {"db": "ok"}
     except Exception as e:
         return {"db": "error", "message": str(e)}
+
+
+@app.get("/violations")
+def violations(
+    limit: int = Query(default=500, ge=1, le=5000),
+):
+    """Return violation points for map display. Ordered by id desc."""
+    engine = get_engine()
+    if engine is None:
+        return {"error": "DATABASE_URL not set", "violations": []}
+    try:
+        with get_connection() as conn:
+            if conn is None:
+                return {"error": "No connection", "violations": []}
+            # Return id, lat, lon, occurred_at, violation_type from geom
+            result = conn.execute(
+                text("""
+                    SELECT id,
+                           ST_Y(geom::geometry) AS lat,
+                           ST_X(geom::geometry) AS lon,
+                           occurred_at,
+                           violation_type
+                    FROM violations
+                    ORDER BY id DESC
+                    LIMIT :lim
+                """),
+                {"lim": limit},
+            )
+            rows = result.fetchall()
+            out = [
+                {
+                    "id": r[0],
+                    "lat": round(float(r[1]), 6),
+                    "lon": round(float(r[2]), 6),
+                    "occurred_at": r[3].isoformat() if r[3] else None,
+                    "violation_type": r[4],
+                }
+                for r in rows
+            ]
+            return {"violations": out}
+    except Exception as e:
+        return {"error": str(e), "violations": []}

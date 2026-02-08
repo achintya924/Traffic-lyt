@@ -1,18 +1,24 @@
 # Traffic-lyt
 
-NYC-first traffic/parking violations analytics. Phase 0: repo scaffolding + local infra.
+NYC-first traffic/parking violations analytics.
+
+- **Phase 0:** Repo scaffolding + local infra (Docker, FastAPI, Next.js, PostGIS).
+- **Phase 1:** Data in, data out — load sample CSV, violations API, map UI.
 
 ## Repo structure
 
 ```
 traffic-lyt/
 ├── apps/
-│   ├── api/          # FastAPI
-│   └── web/          # Next.js + TypeScript
+│   ├── api/          # FastAPI (app.main, app.scripts.ingest_nyc)
+│   └── web/          # Next.js + TypeScript (/map)
+├── data/             # Sample CSV for ingestion
 ├── infra/
 │   └── docker-compose.yml
+├── scripts/          # One-off helpers (e.g. generate sample CSV)
 ├── .env.example
 ├── .gitignore
+├── Makefile          # make ingest, make up, make down
 └── README.md
 ```
 
@@ -81,6 +87,51 @@ curl http://localhost:8000/db-check
 ```
 
 Then open http://localhost:3000 — you should see "Traffic-lyt Phase 0 ✅" and the same health/db-check payloads on the page.
+
+---
+
+## Phase 1: Data and map
+
+### 1. Start the stack
+
+From the **repo root**:
+
+```powershell
+docker compose -f infra/docker-compose.yml up --build
+```
+
+Wait until all services are healthy (db, then api, then web).
+
+### 2. Ingest sample data
+
+With the stack running, in another terminal from the repo root:
+
+**Option A — Make (if you have `make`):**
+
+```powershell
+make ingest
+```
+
+**Option B — Docker Compose directly (Windows/PowerShell):**
+
+```powershell
+docker compose -f infra/docker-compose.yml exec api python -m app.scripts.ingest_nyc
+```
+
+You should see log lines like: `Valid rows: 2500`, `Inserted batch: 500 rows`, `Ingest complete: 2500 rows`. Sample data lives in `data/nyc_violations_sample.csv` and is mounted into the API container at `/data`.
+
+### 3. Open the map
+
+- In the browser go to **http://localhost:3000/map**, or use the “View violations map →” link on the home page.
+- The map loads violations from `GET /violations?limit=500` and shows markers in NYC. Pan and zoom to explore.
+
+### Phase 1 API
+
+- **GET /violations?limit=500** — Returns violation points (id, lat, lon, occurred_at, violation_type). Default limit 500, max 5000.
+
+No extra environment variables or API keys are required for Phase 1.
+
+---
 
 ## Troubleshooting
 

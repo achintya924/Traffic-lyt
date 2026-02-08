@@ -22,9 +22,12 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    volumes:
+      - ../data:/data
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-trafficlyt}:${POSTGRES_PASSWORD:-trafficlyt_secret}@db:5432/${POSTGRES_DB:-trafficlyt}
       CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      DATA_DIR: /data
     depends_on:
       db:
         condition: service_healthy
