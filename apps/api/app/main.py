@@ -1,12 +1,14 @@
 import os
-from contextlib import contextmanager
 
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
+from sqlalchemy import text
+
+from app.db import get_connection, get_engine
+from app.routers import stats
 
 app = FastAPI(title="Traffic-lyt API")
+app.include_router(stats.router)
 
 _cors_origins_raw = os.getenv(
     "CORS_ORIGINS",
@@ -20,31 +22,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-_db_engine: Engine | None = None
-
-
-def get_engine() -> Engine | None:
-    global _db_engine
-    if _db_engine is None:
-        url = os.getenv("DATABASE_URL")
-        if not url:
-            return None
-        _db_engine = create_engine(url, pool_pre_ping=True)
-    return _db_engine
-
-
-@contextmanager
-def get_connection():
-    engine = get_engine()
-    if engine is None:
-        yield None
-        return
-    conn = engine.connect()
-    try:
-        yield conn
-    finally:
-        conn.close()
 
 
 @app.get("/health")
