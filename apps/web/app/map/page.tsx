@@ -18,6 +18,13 @@ type ViolationsResponse = {
   error?: string;
 };
 
+type StatsResponse = {
+  total?: number;
+  min_time?: string | null;
+  max_time?: string | null;
+  top_types?: { violation_type: string; count: number }[];
+};
+
 const ViolationsMap = dynamic(
   () => import('@/app/map/ViolationsMap'),
   { ssr: false }
@@ -25,22 +32,30 @@ const ViolationsMap = dynamic(
 
 export default function MapPage() {
   const [data, setData] = useState<ViolationsResponse | null>(null);
+  const [statsTotal, setStatsTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    async function fetchViolations() {
+    async function fetchData() {
       try {
-        const res = await fetch(`${API_BASE}/violations?limit=500`);
-        const json: ViolationsResponse = await res.json();
+        const [violationsRes, statsRes] = await Promise.all([
+          fetch(`${API_BASE}/violations?limit=500`),
+          fetch(`${API_BASE}/violations/stats`),
+        ]);
+        const json: ViolationsResponse = await violationsRes.json();
         if (!cancelled) {
-          if (!res.ok) {
-            setError(json.error || `HTTP ${res.status}`);
+          if (!violationsRes.ok) {
+            setError(json.error || `HTTP ${violationsRes.status}`);
           } else {
             setData(json);
             setError(json.error || null);
           }
+        }
+        const statsJson: StatsResponse = await statsRes.json();
+        if (!cancelled && typeof statsJson.total === 'number') {
+          setStatsTotal(statsJson.total);
         }
       } catch (e) {
         if (!cancelled) {
@@ -50,7 +65,7 @@ export default function MapPage() {
         if (!cancelled) setLoading(false);
       }
     }
-    fetchViolations();
+    fetchData();
     return () => { cancelled = true; };
   }, []);
 
@@ -83,6 +98,9 @@ export default function MapPage() {
     <main style={{ padding: 0, height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <header style={{ padding: '0.75rem 1rem', background: '#1e293b', flexShrink: 0 }}>
         <h1 style={{ fontSize: '1.25rem' }}>Violations map</h1>
+        <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginTop: '0.25rem' }}>
+          Total violations (filtered): {statsTotal !== null ? statsTotal : '…'}
+        </p>
         <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginTop: '0.25rem' }}>
           {violations.length} points · NYC
         </p>

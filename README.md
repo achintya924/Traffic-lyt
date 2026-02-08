@@ -4,6 +4,7 @@ NYC-first traffic/parking violations analytics.
 
 - **Phase 0:** Repo scaffolding + local infra (Docker, FastAPI, Next.js, PostGIS).
 - **Phase 1:** Data in, data out — load sample CSV, violations API, map UI.
+- **Phase 2.0:** Violation filters, GET /violations/stats, map shows filtered total; API tests (pytest).
 
 ## Repo structure
 
@@ -130,6 +131,50 @@ You should see log lines like: `Valid rows: 2500`, `Inserted batch: 500 rows`, `
 - **GET /violations?limit=500** — Returns violation points (id, lat, lon, occurred_at, violation_type). Default limit 500, max 5000.
 
 No extra environment variables or API keys are required for Phase 1.
+
+---
+
+## Phase 2.0: Stats endpoint and tests
+
+### GET /violations/stats
+
+Returns aggregate stats for violations, with optional filters (date range, hour, violation type).
+
+**Response:** `{ "total": int, "min_time": datetime|null, "max_time": datetime|null, "top_types": [ {"violation_type": str, "count": int}, ... ] }`
+
+**Query params (all optional):** `start`, `end` (ISO datetime), `hour_start`, `hour_end` (0–23), `violation_type` (exact string).
+
+**Example curl (stack running):**
+
+```powershell
+curl "http://localhost:8000/violations/stats"
+curl "http://localhost:8000/violations/stats?violation_type=No%20Parking"
+curl "http://localhost:8000/violations/stats?hour_start=22&hour_end=2"
+```
+
+### Run API tests
+
+Assumes the stack is up and sample data has been ingested (Phase 1). From **repo root**:
+
+```powershell
+docker compose -f infra/docker-compose.yml exec api pytest tests/test_stats.py -v
+```
+
+To run from a local shell (with `DATABASE_URL` set to your running Postgres, e.g. in `.env`):
+
+```powershell
+cd apps\api
+pip install -r requirements.txt
+pytest tests/test_stats.py -v
+```
+
+### Manual verification
+
+```powershell
+curl -s "http://localhost:8000/violations/stats" | ConvertFrom-Json
+curl -s "http://localhost:8000/violations/stats?hour_start=-1"
+# Expect 422 for invalid hour
+```
 
 ---
 
