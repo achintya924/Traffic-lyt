@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 
@@ -12,6 +12,9 @@ type Violation = {
   occurred_at: string | null;
   violation_type: string | null;
 };
+
+type HeatmapPoint = { lat: number; lon: number; count: number };
+type MapBounds = { south: number; north: number; west: number; east: number };
 
 type ViolationsResponse = {
   violations?: Violation[];
@@ -28,10 +31,13 @@ type StatsResponse = {
 type HourBucket = { hour: number; count: number };
 type DayBucket = { day: string; count: number };
 
-const ViolationsMap = dynamic(
-  () => import('@/app/map/ViolationsMap'),
-  { ssr: false }
-);
+const ViolationsMap = dynamic(() => import('@/app/map/ViolationsMap'), { ssr: false });
+
+const GRID_OPTIONS = [200, 250, 500, 1000] as const;
+
+function bboxString(b: MapBounds): string {
+  return `${b.west},${b.south},${b.east},${b.north}`;
+}
 
 function busiestHour(buckets: HourBucket[]): HourBucket | null {
   if (!buckets.length) return null;
@@ -54,6 +60,14 @@ export default function MapPage() {
   const [dayBuckets, setDayBuckets] = useState<DayBucket[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'markers' | 'heatmap'>('markers');
+  const [gridSize, setGridSize] = useState<number>(250);
+  const [bounds, setBounds] = useState<MapBounds | null>(null);
+  const [heatmapPoints, setHeatmapPoints] = useState<HeatmapPoint[]>([]);
+  const [heatmapLoading, setHeatmapLoading] = useState(false);
+  const [heatmapError, setHeatmapError] = useState<string | null>(null);
+  const boundsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const firstBoundsSetRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -98,6 +112,51 @@ export default function MapPage() {
     return () => { cancelled = true; };
   }, []);
 
+  const onBoundsChange = useCallback((b: MapBounds) => {
+    // First bounds report: set immediately so heatmap can fetch without waiting for debounce.
+    if (!firstBoundsSetRef.current) {
+      firstBoundsSetRef.current = true;
+      setBounds(b);
+      return;
+    }
+    if (boundsTimeoutRef.current) clearTimeout(boundsTimeoutRef.current);
+    boundsTimeoutRef.current = setTimeout(() => {
+      setBounds(b);
+      boundsTimeoutRef.current = null;
+    }, 300);
+  }, []);
+
+  useEffect(() => {
+    if (viewMode !== 'heatmap' || !bounds) return;
+    let cancelled = false;
+    setHeatmapError(null);
+    setHeatmapLoading(true);
+    const url = `${API_BASE}/aggregations/grid?cell_m=${gridSize}&bbox=${bboxString(bounds)}`;
+    fetch(url)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((list: HeatmapPoint[]) => {
+        if (!cancelled) {
+          setHeatmapPoints(Array.isArray(list) ? list : []);
+          setHeatmapError(null);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setHeatmapError(e instanceof Error ? e.message : String(e));
+          setHeatmapPoints([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setHeatmapLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewMode, bounds, gridSize]);
+
   if (loading) {
     return (
       <main style={{ padding: '2rem', textAlign: 'center' }}>
@@ -135,6 +194,66 @@ export default function MapPage() {
         <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginTop: '0.25rem' }}>
           {violations.length} points · NYC
         </p>
+        {/* TEMP: bounds debug for Phase 2.2-B verification */}
+        <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
+          Bounds: {bounds ? `${bounds.west.toFixed(3)},${bounds.south.toFixed(3)},${bounds.east.toFixed(3)},${bounds.north.toFixed(3)}` : 'n/a'}
+        </p>
+        <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>View:</span>
+          <button
+            type="button"
+            onClick={() => setViewMode('markers')}
+            style={{
+              padding: '0.25rem 0.5rem',
+              fontSize: '0.8rem',
+              background: viewMode === 'markers' ? '#334155' : 'transparent',
+              color: '#e2e8f0',
+              border: '1px solid #475569',
+              borderRadius: 4,
+              cursor: 'pointer',
+            }}
+          >
+            Markers
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('heatmap')}
+            style={{
+              padding: '0.25rem 0.5rem',
+              fontSize: '0.8rem',
+              background: viewMode === 'heatmap' ? '#334155' : 'transparent',
+              color: '#e2e8f0',
+              border: '1px solid #475569',
+              borderRadius: 4,
+              cursor: 'pointer',
+            }}
+          >
+            Heatmap
+          </button>
+          {viewMode === 'heatmap' && (
+            <>
+              <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Grid:</span>
+              <select
+                value={gridSize}
+                onChange={(e) => setGridSize(Number(e.target.value))}
+                style={{
+                  padding: '0.25rem 0.5rem',
+                  fontSize: '0.8rem',
+                  background: '#1e293b',
+                  color: '#e2e8f0',
+                  border: '1px solid #475569',
+                  borderRadius: 4,
+                }}
+              >
+                {GRID_OPTIONS.map((m) => (
+                  <option key={m} value={m}>{m}m</option>
+                ))}
+              </select>
+              {heatmapLoading && <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Loading…</span>}
+              {heatmapError && <span style={{ fontSize: '0.8rem', color: '#f87171' }}>{heatmapError}</span>}
+            </>
+          )}
+        </div>
         <div style={{ marginTop: '0.75rem', padding: '0.5rem 0', borderTop: '1px solid #334155' }}>
           <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '0.25rem' }}>Insights</div>
           <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: 0 }}>
@@ -146,7 +265,12 @@ export default function MapPage() {
         </div>
       </header>
       <div style={{ flex: 1, minHeight: 0 }}>
-        <ViolationsMap violations={violations} />
+        <ViolationsMap
+          violations={violations}
+          viewMode={viewMode}
+          heatmapPoints={heatmapPoints}
+          onBoundsChange={onBoundsChange}
+        />
       </div>
     </main>
   );
