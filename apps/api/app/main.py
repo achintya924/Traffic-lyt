@@ -5,12 +5,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.db import get_connection, get_engine
-from app.routers import spatial_aggregations, stats, time_aggregations
+from app.routers import predict, spatial_aggregations, stats, time_aggregations
 
 app = FastAPI(title="Traffic-lyt API")
 app.include_router(stats.router)
 app.include_router(time_aggregations.router)
 app.include_router(spatial_aggregations.router)
+app.include_router(predict.router)
 
 _cors_origins_raw = os.getenv(
     "CORS_ORIGINS",
