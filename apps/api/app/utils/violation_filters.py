@@ -3,7 +3,7 @@ Reusable violation filter helper (date, hour, violation_type).
 Used by GET /violations/stats and can be reused in later phases.
 """
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Tuple
 
 from fastapi import HTTPException, Query
 
@@ -16,6 +16,7 @@ class ViolationFilters(BaseModel):
     hour_start: Optional[int] = None  # 0..23
     hour_end: Optional[int] = None   # 0..23
     violation_type: Optional[str] = None
+    bbox: Optional[str] = None  # "minLon,minLat,maxLon,maxLat"
 
 
 def get_violation_filters(
@@ -24,6 +25,7 @@ def get_violation_filters(
     hour_start: Optional[int] = Query(None, ge=0, le=23, description="Start hour (0-23)"),
     hour_end: Optional[int] = Query(None, ge=0, le=23, description="End hour (0-23), can wrap past midnight"),
     violation_type: Optional[str] = Query(None, description="Exact violation_type match"),
+    bbox: Optional[str] = Query(None, description="Bounding box: minLon,minLat,maxLon,maxLat"),
 ) -> ViolationFilters:
     if start is not None and end is not None and start > end:
         raise HTTPException(status_code=422, detail="start must be <= end")
@@ -33,7 +35,27 @@ def get_violation_filters(
         hour_start=hour_start,
         hour_end=hour_end,
         violation_type=violation_type.strip() if violation_type else None,
+        bbox=bbox,
     )
+
+
+def _parse_bbox(bbox: Optional[str]) -> Optional[Tuple[float, float, float, float]]:
+    """
+    Parse 'minLon,minLat,maxLon,maxLat' into (min_lon, min_lat, max_lon, max_lat).
+    Returns None if the string is empty or invalid.
+    """
+    if not bbox or not bbox.strip():
+        return None
+    parts = [p.strip() for p in bbox.split(",")]
+    if len(parts) != 4:
+        return None
+    try:
+        min_lon, min_lat, max_lon, max_lat = (float(p) for p in parts)
+    except ValueError:
+        return None
+    if min_lon >= max_lon or min_lat >= max_lat:
+        return None
+    return (min_lon, min_lat, max_lon, max_lat)
 
 
 def build_violation_where(filters: ViolationFilters) -> tuple[str, dict]:
@@ -75,6 +97,18 @@ def build_violation_where(filters: ViolationFilters) -> tuple[str, dict]:
     elif h_end is not None:
         clauses.append("EXTRACT(HOUR FROM occurred_at) = :hour_end")
         params["hour_end"] = h_end
+
+    # Optional spatial filter via bbox: geom && ST_MakeEnvelope(...)
+    bbox_tuple = _parse_bbox(filters.bbox)
+    if bbox_tuple is not None:
+        min_lon, min_lat, max_lon, max_lat = bbox_tuple
+        clauses.append(
+            "geom && ST_MakeEnvelope(:bbox_min_lon, :bbox_min_lat, :bbox_max_lon, :bbox_max_lat, 4326)"
+        )
+        params["bbox_min_lon"] = min_lon
+        params["bbox_min_lat"] = min_lat
+        params["bbox_max_lon"] = max_lon
+        params["bbox_max_lat"] = max_lat
 
     where_sql = " AND ".join(clauses)
     if where_sql:
