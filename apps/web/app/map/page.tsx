@@ -157,6 +157,39 @@ export default function MapPage() {
     };
   }, [viewMode, bounds, gridSize]);
 
+  // Re-fetch viewport-aware analytics (stats + hour/day buckets) whenever bounds change.
+  useEffect(() => {
+    if (!bounds) return;
+    let cancelled = false;
+    const bbox = bboxString(bounds);
+    async function fetchViewportAnalytics() {
+      try {
+        const [statsRes, hourRes, dayRes] = await Promise.all([
+          fetch(`${API_BASE}/violations/stats?bbox=${bbox}`),
+          fetch(`${API_BASE}/aggregations/time/hour?bbox=${bbox}`),
+          fetch(`${API_BASE}/aggregations/time/day?bbox=${bbox}`),
+        ]);
+        if (!statsRes.ok || !hourRes.ok || !dayRes.ok) {
+          return;
+        }
+        const [statsJson, hoursJson, daysJson]: [StatsResponse, HourBucket[], DayBucket[]] =
+          await Promise.all([statsRes.json(), hourRes.json(), dayRes.json()]);
+        if (cancelled) return;
+        if (typeof statsJson.total === 'number') {
+          setStatsTotal(statsJson.total);
+        }
+        setHourBuckets(Array.isArray(hoursJson) ? hoursJson : []);
+        setDayBuckets(Array.isArray(daysJson) ? daysJson : []);
+      } catch {
+        // Keep existing values on error; viewport insights simply won't update this time.
+      }
+    }
+    fetchViewportAnalytics();
+    return () => {
+      cancelled = true;
+    };
+  }, [bounds]);
+
   if (loading) {
     return (
       <main style={{ padding: '2rem', textAlign: 'center' }}>
@@ -189,7 +222,7 @@ export default function MapPage() {
       <header style={{ padding: '0.75rem 1rem', background: '#1e293b', flexShrink: 0 }}>
         <h1 style={{ fontSize: '1.25rem' }}>Violations map</h1>
         <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginTop: '0.25rem' }}>
-          Total violations (filtered): {statsTotal !== null ? statsTotal : '…'}
+          Total violations (this view): {statsTotal !== null ? statsTotal : '…'}
         </p>
         <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginTop: '0.25rem' }}>
           {violations.length} points · NYC
@@ -255,7 +288,9 @@ export default function MapPage() {
           )}
         </div>
         <div style={{ marginTop: '0.75rem', padding: '0.5rem 0', borderTop: '1px solid #334155' }}>
-          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '0.25rem' }}>Insights</div>
+          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '0.25rem' }}>
+            Insights (this view)
+          </div>
           <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: 0 }}>
             Busiest hour: {hour && hour.count > 0 ? `${String(hour.hour).padStart(2, '0')}:00 (${hour.count})` : 'No data'}
           </p>
