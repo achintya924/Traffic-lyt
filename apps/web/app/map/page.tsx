@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { fetchHotspotsGrid, type HotspotCell } from '@/app/lib/api';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 
@@ -53,6 +54,12 @@ function busiestDay(buckets: DayBucket[]): DayBucket | null {
   );
 }
 
+function top5Hotspots(cells: HotspotCell[]): HotspotCell[] {
+  return [...cells]
+    .sort((a, b) => b.score !== a.score ? b.score - a.score : b.ratio - a.ratio)
+    .slice(0, 5);
+}
+
 export default function MapPage() {
   const [data, setData] = useState<ViolationsResponse | null>(null);
   const [statsTotal, setStatsTotal] = useState<number | null>(null);
@@ -66,6 +73,10 @@ export default function MapPage() {
   const [heatmapPoints, setHeatmapPoints] = useState<HeatmapPoint[]>([]);
   const [heatmapLoading, setHeatmapLoading] = useState(false);
   const [heatmapError, setHeatmapError] = useState<string | null>(null);
+  const [hotspotsCells, setHotspotsCells] = useState<HotspotCell[]>([]);
+  const [hotspotsLoading, setHotspotsLoading] = useState(false);
+  const [hotspotsError, setHotspotsError] = useState<string | null>(null);
+  const [flyToTarget, setFlyToTarget] = useState<[number, number] | null>(null);
   const boundsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const firstBoundsSetRef = useRef(false);
 
@@ -157,11 +168,13 @@ export default function MapPage() {
     };
   }, [viewMode, bounds, gridSize]);
 
-  // Re-fetch viewport-aware analytics (stats + hour/day buckets) whenever bounds change.
+  // Re-fetch viewport-aware analytics (stats + hour/day buckets + hotspots) whenever bounds change.
   useEffect(() => {
     if (!bounds) return;
     let cancelled = false;
     const bbox = bboxString(bounds);
+    setHotspotsError(null);
+    setHotspotsLoading(true);
     async function fetchViewportAnalytics() {
       try {
         const [statsRes, hourRes, dayRes] = await Promise.all([
@@ -183,12 +196,31 @@ export default function MapPage() {
       } catch {
         // Keep existing values on error; viewport insights simply won't update this time.
       }
+      try {
+        const hotspots = await fetchHotspotsGrid({
+          bbox,
+          cell_m: gridSize,
+          recent_days: 7,
+          baseline_days: 30,
+          limit: 3000,
+        });
+        if (cancelled) return;
+        setHotspotsCells(hotspots.cells);
+        setHotspotsError(null);
+      } catch (e) {
+        if (!cancelled) {
+          setHotspotsError(e instanceof Error ? e.message : 'Hotspots unavailable');
+          setHotspotsCells([]);
+        }
+      } finally {
+        if (!cancelled) setHotspotsLoading(false);
+      }
     }
     fetchViewportAnalytics();
     return () => {
       cancelled = true;
     };
-  }, [bounds]);
+  }, [bounds, gridSize]);
 
   if (loading) {
     return (
@@ -297,6 +329,74 @@ export default function MapPage() {
           <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: '0.25rem 0 0 0' }}>
             Busiest day: {day && day.count > 0 ? `${day.day} (${day.count})` : 'No data'}
           </p>
+          <div style={{ marginTop: '0.5rem' }}>
+            <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '0.25rem' }}>
+              Top 5 Hotspots
+            </div>
+            {hotspotsLoading && (
+              <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: 0 }}>Loading…</p>
+            )}
+            {hotspotsError && !hotspotsLoading && (
+              <p style={{ fontSize: '0.8rem', color: '#f87171', margin: 0 }}>{hotspotsError}</p>
+            )}
+            {!hotspotsLoading && !hotspotsError && (() => {
+              const top5 = top5Hotspots(hotspotsCells);
+              if (top5.length === 0) {
+                return <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: 0 }}>No hotspots in this view/time range.</p>;
+              }
+              const riskColors = { high: '#ef4444', medium: '#f59e0b', low: '#22c55e' };
+              return (
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                  {top5.map((cell, i) => (
+                    <li
+                      key={`${cell.centroid[0]}-${cell.centroid[1]}`}
+                      style={{
+                        fontSize: '0.75rem',
+                        color: '#e2e8f0',
+                        marginTop: '0.25rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <span style={{ fontWeight: 600, minWidth: '1.25rem' }}>{i + 1}.</span>
+                      <span
+                        style={{
+                          background: riskColors[cell.risk_level],
+                          color: '#fff',
+                          padding: '0.1rem 0.35rem',
+                          borderRadius: 4,
+                          fontSize: '0.7rem',
+                        }}
+                      >
+                        {cell.risk_level}
+                      </span>
+                      <span>Score {Math.round(cell.score)}</span>
+                      <span style={{ color: '#94a3b8' }}>
+                        ({cell.recent_count} vs {cell.baseline_count})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setFlyToTarget([cell.centroid[1], cell.centroid[0]])}
+                        style={{
+                          padding: '0.1rem 0.35rem',
+                          fontSize: '0.7rem',
+                          background: '#334155',
+                          color: '#e2e8f0',
+                          border: '1px solid #475569',
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Go to
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              );
+            })()}
+          </div>
         </div>
       </header>
       <div style={{ flex: 1, minHeight: 0 }}>
@@ -305,6 +405,8 @@ export default function MapPage() {
           viewMode={viewMode}
           heatmapPoints={heatmapPoints}
           onBoundsChange={onBoundsChange}
+          flyToTarget={flyToTarget}
+          onFlyToDone={() => setFlyToTarget(null)}
         />
       </div>
     </main>

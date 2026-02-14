@@ -25,13 +25,17 @@ Example curl (trends):
   # Hourly trend with hour wrap + violation_type
   # curl "http://localhost:8000/predict/trends?granularity=hour&window=24&hour_start=22&hour_end=3&violation_type=No%20Parking"
 
-Example curl (hotspots grid):
-
-  # bbox + default windows
+Example curl (hotspots grid; omit end to use dataset max time for static data):
   # curl "http://localhost:8000/predict/hotspots/grid?cell_m=250&recent_days=7&baseline_days=30&bbox=-74.1,40.6,-73.9,40.8"
 
   # violation_type + hour wrap + bbox
   # curl "http://localhost:8000/predict/hotspots/grid?cell_m=300&recent_days=3&baseline_days=14&hour_start=22&hour_end=3&violation_type=NO%20PARKING&bbox=-74.1,40.6,-73.9,40.8"
+
+Example curl (risk / Poisson regression):
+  # hourly risk for bbox
+  # curl "http://localhost:8000/predict/risk?granularity=hour&horizon=24&bbox=-74.1,40.6,-73.9,40.8"
+  # daily risk for violation_type + hour wrap + bbox (add end to ensure data overlap with static data)
+  # curl "http://localhost:8000/predict/risk?granularity=day&horizon=7&violation_type=NO%20PARKING&hour_start=22&hour_end=3&bbox=-74.1,40.6,-73.9,40.8&end=2024-12-28T23:59:59"
 """
 import logging
 from typing import Any
@@ -41,6 +45,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.db import get_connection, get_engine
 from app.predict.forecast import forecast_counts
 from app.predict.hotspots import get_hotspot_grid
+from app.predict.regression import (
+    backtest,
+    build_training_rows,
+    explain_coefficients,
+    get_last_ts_from_history,
+    predict_future,
+    train_poisson_model,
+)
 from app.predict.timeseries import get_counts_timeseries
 from app.predict.trends import compute_trends
 from app.queries.predict_sql import Granularity
@@ -314,4 +326,109 @@ def hotspots_grid(
         raise HTTPException(status_code=500, detail="predict/hotspots/grid failed")
 
     return result
+
+
+@router.get("/risk")
+def risk(
+    granularity: Granularity = Query(
+        "hour",
+        description="Aggregation granularity: 'hour' or 'day'",
+    ),
+    horizon: int | None = Query(
+        None,
+        ge=1,
+        le=365,
+        description="Forecast horizon; default 24 for hour, 7 for day",
+    ),
+    limit_history: int = Query(
+        1000,
+        ge=50,
+        le=5000,
+        description="Maximum history points for training",
+    ),
+    alpha: float = Query(
+        0.1,
+        ge=0.0,
+        le=10.0,
+        description="Poisson regression L2 regularization",
+    ),
+    filters: ViolationFilters = Depends(get_violation_filters),
+) -> dict[str, Any]:
+    """
+    Train a Poisson regression on time-series features (dow, hour, is_weekend) and predict next N buckets.
+    Falls back to MA forecast when insufficient data (< 30 points).
+    """
+    effective_horizon = horizon if horizon is not None else (24 if granularity == "hour" else 7)
+
+    engine = get_engine()
+    if engine is None:
+        return {
+            "granularity": granularity,
+            "model": {"name": "poisson_regression", "alpha": alpha, "horizon": effective_horizon},
+            "history_points": 0,
+            "metrics": {"mae": 0.0, "mape": 0.0, "test_points": 0},
+            "explain": {"top_positive": [], "top_negative": []},
+            "forecast": [],
+            "meta": {"fallback_used": False, "insufficient_data": True},
+        }
+
+    try:
+        with get_connection() as conn:
+            if conn is None:
+                return {
+                    "granularity": granularity,
+                    "model": {"name": "poisson_regression", "alpha": alpha, "horizon": effective_horizon},
+                    "history_points": 0,
+                    "metrics": {"mae": 0.0, "mape": 0.0, "test_points": 0},
+                    "explain": {"top_positive": [], "top_negative": []},
+                    "forecast": [],
+                    "meta": {"fallback_used": False, "insufficient_data": True},
+                }
+            history = get_counts_timeseries(conn, filters, granularity, limit_history)
+
+        X_rows, y_list, _ = build_training_rows(history, granularity)
+        fitted, train_meta = train_poisson_model(X_rows, y_list, granularity, alpha=alpha)
+
+        if fitted is None or train_meta.get("insufficient_data"):
+            fallback = forecast_counts(
+                history,
+                granularity,
+                effective_horizon,
+                model="ma",
+                window=6,
+            )
+            forecast_out = [
+                {"ts": f["ts"], "expected": float(f["count"]), "expected_rounded": int(f["count"])}
+                for f in fallback
+            ]
+            return {
+                "granularity": granularity,
+                "model": {"name": "poisson_regression", "alpha": alpha, "horizon": effective_horizon},
+                "history_points": len(history),
+                "metrics": {"mae": 0.0, "mape": 0.0, "test_points": 0},
+                "explain": {"top_positive": [], "top_negative": []},
+                "forecast": forecast_out,
+                "meta": {"fallback_used": True, "insufficient_data": True},
+            }
+
+        metrics = backtest(fitted, X_rows, y_list, granularity)
+        last_ts = get_last_ts_from_history(history)
+        if last_ts is None:
+            forecast_out = []
+        else:
+            forecast_out = predict_future(fitted, last_ts, granularity, effective_horizon)
+        explain = explain_coefficients(fitted, top_k=8)
+
+        return {
+            "granularity": granularity,
+            "model": {"name": "poisson_regression", "alpha": alpha, "horizon": effective_horizon},
+            "history_points": len(history),
+            "metrics": metrics,
+            "explain": explain,
+            "forecast": forecast_out,
+            "meta": {"fallback_used": False, "insufficient_data": False},
+        }
+    except Exception:
+        logger.exception("predict/risk failed")
+        raise HTTPException(status_code=500, detail="predict/risk failed")
 

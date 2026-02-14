@@ -59,6 +59,25 @@ function BoundsReporter({ onBoundsChange }: { onBoundsChange: (b: MapBounds) => 
   return null;
 }
 
+const FLY_ZOOM = 15;
+
+function FlyToTarget({
+  target,
+  onDone,
+}: {
+  target: [number, number] | null;
+  onDone: () => void;
+}) {
+  const map = useMap();
+  useEffect(() => {
+    if (!target) return;
+    const [lat, lon] = target;
+    map.flyTo([lat, lon], FLY_ZOOM, { duration: 0.5 });
+    onDone();
+  }, [map, target, onDone]);
+  return null;
+}
+
 function HeatmapLayer({ points }: { points: HeatmapPoint[] }) {
   const map = useMap();
   const layerRef = useRef<{ setLatLngs: (latlngs: [number, number, number][]) => void } | null>(null);
@@ -88,9 +107,18 @@ type ViolationsMapProps = {
   viewMode: 'markers' | 'heatmap';
   heatmapPoints: HeatmapPoint[];
   onBoundsChange: (b: MapBounds) => void;
+  flyToTarget?: [number, number] | null;
+  onFlyToDone?: () => void;
 };
 
-export default function ViolationsMap({ violations, viewMode, heatmapPoints, onBoundsChange }: ViolationsMapProps) {
+export default function ViolationsMap({
+  violations,
+  viewMode,
+  heatmapPoints,
+  onBoundsChange,
+  flyToTarget = null,
+  onFlyToDone = () => {},
+}: ViolationsMapProps) {
   return (
     <MapContainer
       center={NYC_CENTER}
@@ -103,6 +131,7 @@ export default function ViolationsMap({ violations, viewMode, heatmapPoints, onB
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <BoundsReporter onBoundsChange={onBoundsChange} />
+      <FlyToTarget target={flyToTarget ?? null} onDone={onFlyToDone} />
       {viewMode === 'heatmap' && <HeatmapLayer points={heatmapPoints} />}
       {viewMode === 'markers' &&
         violations.map((v) => (
