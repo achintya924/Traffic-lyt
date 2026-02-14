@@ -16,6 +16,14 @@ Example curl (forecast):
 
   # Forecast next 7 days with violation_type + hour wrap
   # curl "http://localhost:8000/predict/forecast?granularity=day&horizon=7&violation_type=No%20Parking&hour_start=22&hour_end=2"
+
+Example curl (trends):
+
+  # Daily trend with bbox
+  # curl "http://localhost:8000/predict/trends?granularity=day&window=14&bbox=-74.1,40.6,-73.9,40.8"
+
+  # Hourly trend with hour wrap + violation_type
+  # curl "http://localhost:8000/predict/trends?granularity=hour&window=24&hour_start=22&hour_end=3&violation_type=No%20Parking"
 """
 import logging
 from typing import Any
@@ -25,6 +33,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.db import get_connection, get_engine
 from app.predict.forecast import forecast_counts
 from app.predict.timeseries import get_counts_timeseries
+from app.predict.trends import compute_trends
 from app.queries.predict_sql import Granularity
 from app.utils.violation_filters import ViolationFilters, get_violation_filters
 
@@ -142,5 +151,85 @@ def forecast(
         "history": history,
         "forecast": forecast_list,
         "meta": {"history_points": len(history), "forecast_points": len(forecast_list)},
+    }
+
+
+@router.get("/trends")
+def trends(
+    granularity: Granularity = Query(
+        "day",
+        description="Aggregation granularity: 'hour' or 'day'",
+    ),
+    window: int = Query(
+        14,
+        ge=3,
+        le=180,
+        description="Window size for recent/previous period comparison",
+    ),
+    limit_history: int = Query(
+        500,
+        ge=1,
+        le=5000,
+        description="Maximum number of history buckets (use at least 2*window for full metrics)",
+    ),
+    anomaly_z: float = Query(
+        2.5,
+        ge=1.0,
+        le=6.0,
+        description="Z-score threshold for anomaly detection",
+    ),
+    filters: ViolationFilters = Depends(get_violation_filters),
+) -> dict[str, Any]:
+    """
+    Return explainable trend metrics for violation counts (current filters + bbox).
+    """
+    engine = get_engine()
+    if engine is None:
+        return {
+            "granularity": granularity,
+            "trends": {
+                "window": window,
+                "recent_mean": 0.0,
+                "prev_mean": 0.0,
+                "pct_change": 0.0,
+                "slope": 0.0,
+                "trend_direction": "flat",
+                "volatility": 0.0,
+                "anomalies": [],
+                "insufficient_data": True,
+                "points_used": 0,
+            },
+            "meta": {"history_points": 0},
+        }
+
+    try:
+        with get_connection() as conn:
+            if conn is None:
+                return {
+                    "granularity": granularity,
+                    "trends": {
+                        "window": window,
+                        "recent_mean": 0.0,
+                        "prev_mean": 0.0,
+                        "pct_change": 0.0,
+                        "slope": 0.0,
+                        "trend_direction": "flat",
+                        "volatility": 0.0,
+                        "anomalies": [],
+                        "insufficient_data": True,
+                        "points_used": 0,
+                    },
+                    "meta": {"history_points": 0},
+                }
+            history = get_counts_timeseries(conn, filters, granularity, limit_history)
+        trends_result = compute_trends(history, window=window, anomaly_z=anomaly_z)
+    except Exception:
+        logger.exception("predict/trends failed")
+        raise HTTPException(status_code=500, detail="predict/trends failed")
+
+    return {
+        "granularity": granularity,
+        "trends": trends_result,
+        "meta": {"history_points": len(history)},
     }
 
