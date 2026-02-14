@@ -58,21 +58,27 @@ def _parse_bbox(bbox: Optional[str]) -> Optional[Tuple[float, float, float, floa
     return (min_lon, min_lat, max_lon, max_lat)
 
 
-def build_violation_where(filters: ViolationFilters) -> tuple[str, dict]:
+def build_violation_where(
+    filters: ViolationFilters,
+    param_prefix: str | None = None,
+) -> tuple[str, dict]:
     """
     Build WHERE clause and params for violations table.
     Returns (where_sql, params) for use with text() and conn.execute().
     where_sql is "" or " WHERE ... AND ..."; params is a dict for placeholders.
+    If param_prefix is set (e.g. "recent_" or "baseline_"), start/end param names
+    get that prefix so multiple windows can be used in one query.
     """
     clauses: list[str] = []
     params: dict = {}
+    p = param_prefix or ""
 
     if filters.start is not None:
-        clauses.append("occurred_at >= :start")
-        params["start"] = filters.start
+        clauses.append(f"occurred_at >= :{p}start")
+        params[f"{p}start"] = filters.start
     if filters.end is not None:
-        clauses.append("occurred_at <= :end")
-        params["end"] = filters.end
+        clauses.append(f"occurred_at <= :{p}end")
+        params[f"{p}end"] = filters.end
     if filters.violation_type:
         clauses.append("violation_type = :violation_type")
         params["violation_type"] = filters.violation_type

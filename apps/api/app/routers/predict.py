@@ -24,6 +24,14 @@ Example curl (trends):
 
   # Hourly trend with hour wrap + violation_type
   # curl "http://localhost:8000/predict/trends?granularity=hour&window=24&hour_start=22&hour_end=3&violation_type=No%20Parking"
+
+Example curl (hotspots grid):
+
+  # bbox + default windows
+  # curl "http://localhost:8000/predict/hotspots/grid?cell_m=250&recent_days=7&baseline_days=30&bbox=-74.1,40.6,-73.9,40.8"
+
+  # violation_type + hour wrap + bbox
+  # curl "http://localhost:8000/predict/hotspots/grid?cell_m=300&recent_days=3&baseline_days=14&hour_start=22&hour_end=3&violation_type=NO%20PARKING&bbox=-74.1,40.6,-73.9,40.8"
 """
 import logging
 from typing import Any
@@ -32,6 +40,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.db import get_connection, get_engine
 from app.predict.forecast import forecast_counts
+from app.predict.hotspots import get_hotspot_grid
 from app.predict.timeseries import get_counts_timeseries
 from app.predict.trends import compute_trends
 from app.queries.predict_sql import Granularity
@@ -232,4 +241,77 @@ def trends(
         "trends": trends_result,
         "meta": {"history_points": len(history)},
     }
+
+
+@router.get("/hotspots/grid")
+def hotspots_grid(
+    cell_m: int = Query(
+        250,
+        ge=50,
+        le=2000,
+        description="Grid cell size in meters",
+    ),
+    recent_days: int = Query(
+        7,
+        ge=1,
+        le=90,
+        description="Recent window length in days",
+    ),
+    baseline_days: int = Query(
+        30,
+        ge=1,
+        le=365,
+        description="Baseline window length in days",
+    ),
+    limit: int = Query(
+        3000,
+        ge=1,
+        le=10000,
+        description="Maximum number of cells to return",
+    ),
+    filters: ViolationFilters = Depends(get_violation_filters),
+) -> dict[str, Any]:
+    """
+    Return grid cells with recent_count, baseline_count, risk score (0-100), and risk_level.
+    Uses bbox + filters; bbox is recommended for performance.
+    """
+    engine = get_engine()
+    if engine is None:
+        return {
+            "cells": [],
+            "meta": {
+                "cell_m": cell_m,
+                "grid_size_deg": round(cell_m / 111320.0, 8),
+                "recent_days": recent_days,
+                "baseline_days": baseline_days,
+                "points": 0,
+            },
+        }
+
+    try:
+        with get_connection() as conn:
+            if conn is None:
+                return {
+                    "cells": [],
+                    "meta": {
+                        "cell_m": cell_m,
+                        "grid_size_deg": round(cell_m / 111320.0, 8),
+                        "recent_days": recent_days,
+                        "baseline_days": baseline_days,
+                        "points": 0,
+                    },
+                }
+            result = get_hotspot_grid(
+                conn,
+                filters,
+                cell_m=cell_m,
+                recent_days=recent_days,
+                baseline_days=baseline_days,
+                limit=limit,
+            )
+    except Exception:
+        logger.exception("predict/hotspots/grid failed")
+        raise HTTPException(status_code=500, detail="predict/hotspots/grid failed")
+
+    return result
 
