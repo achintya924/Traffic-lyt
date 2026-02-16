@@ -56,10 +56,47 @@ from app.predict.regression import (
 from app.predict.timeseries import get_counts_timeseries
 from app.predict.trends import compute_trends
 from app.queries.predict_sql import Granularity
+from app.utils.time_anchor import (
+    build_time_window_meta,
+    compute_anchored_window,
+    get_data_time_range,
+)
 from app.utils.violation_filters import ViolationFilters, get_violation_filters
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/predict", tags=["predict"])
+
+
+def _filters_with_anchored_window(
+    conn: Any,
+    filters: ViolationFilters,
+) -> tuple[ViolationFilters, dict[str, Any]]:
+    """Phase 4.1: Return (filters_to_use, time_meta). When user has no start/end, anchor to data_max_ts."""
+    data_min_ts, data_max_ts = get_data_time_range(conn, filters)
+    effective_start, effective_end, anchor_ts, window_source = compute_anchored_window(
+        filters, data_min_ts, data_max_ts
+    )
+    time_meta = build_time_window_meta(
+        data_min_ts=data_min_ts,
+        data_max_ts=data_max_ts,
+        anchor_ts=anchor_ts,
+        effective_start_ts=effective_start,
+        effective_end_ts=effective_end,
+        window_source=window_source,
+        message="No data for the given filter scope." if data_max_ts is None else None,
+    )
+    if effective_start is not None and effective_end is not None:
+        filters_to_use = ViolationFilters(
+            start=effective_start,
+            end=effective_end,
+            hour_start=filters.hour_start,
+            hour_end=filters.hour_end,
+            violation_type=filters.violation_type,
+            bbox=filters.bbox,
+        )
+    else:
+        filters_to_use = filters
+    return filters_to_use, time_meta
 
 
 @router.get("/timeseries")
@@ -78,19 +115,48 @@ def timeseries(
 ) -> dict[str, Any]:
     """
     Return a continuous time-series of counts for the given granularity.
-
-    Filters (start/end, hour_start/hour_end, violation_type, bbox) are reused from
-    the shared violation_filters dependency, including bbox handling.
+    Phase 4.1: When start/end not provided, effective window is [data_min_ts, data_max_ts] (anchored).
     """
     engine = get_engine()
     if engine is None:
-        return {"granularity": granularity, "series": [], "meta": {"points": 0}}
+        return {
+            "granularity": granularity,
+            "series": [],
+            "meta": {
+                "points": 0,
+                **build_time_window_meta(
+                    data_min_ts=None,
+                    data_max_ts=None,
+                    anchor_ts=None,
+                    effective_start_ts=None,
+                    effective_end_ts=None,
+                    window_source="anchored",
+                    message="No database connection.",
+                ),
+            },
+        }
 
     try:
         with get_connection() as conn:
             if conn is None:
-                return {"granularity": granularity, "series": [], "meta": {"points": 0}}
-            series = get_counts_timeseries(conn, filters, granularity, limit_history)
+                return {
+                    "granularity": granularity,
+                    "series": [],
+                    "meta": {
+                        "points": 0,
+                        **build_time_window_meta(
+                            data_min_ts=None,
+                            data_max_ts=None,
+                            anchor_ts=None,
+                            effective_start_ts=None,
+                            effective_end_ts=None,
+                            window_source="anchored",
+                            message="No connection.",
+                        ),
+                    },
+                }
+            filters_to_use, time_meta = _filters_with_anchored_window(conn, filters)
+            series = get_counts_timeseries(conn, filters_to_use, granularity, limit_history)
     except Exception:
         logger.exception("predict/timeseries failed")
         raise HTTPException(status_code=500, detail="predict/timeseries failed")
@@ -98,7 +164,7 @@ def timeseries(
     return {
         "granularity": granularity,
         "series": series,
-        "meta": {"points": len(series)},
+        "meta": {"points": len(series), **time_meta},
     }
 
 
@@ -133,6 +199,15 @@ def forecast(
     """
     effective_horizon = horizon if horizon is not None else (24 if granularity == "hour" else 7)
 
+    empty_time_meta = build_time_window_meta(
+        data_min_ts=None,
+        data_max_ts=None,
+        anchor_ts=None,
+        effective_start_ts=None,
+        effective_end_ts=None,
+        window_source="anchored",
+        message="No database connection.",
+    )
     engine = get_engine()
     if engine is None:
         return {
@@ -140,7 +215,7 @@ def forecast(
             "model": {"name": model, "window": window, "alpha": alpha, "horizon": effective_horizon},
             "history": [],
             "forecast": [],
-            "meta": {"history_points": 0, "forecast_points": 0},
+            "meta": {"history_points": 0, "forecast_points": 0, **empty_time_meta},
         }
 
     try:
@@ -151,9 +226,10 @@ def forecast(
                     "model": {"name": model, "window": window, "alpha": alpha, "horizon": effective_horizon},
                     "history": [],
                     "forecast": [],
-                    "meta": {"history_points": 0, "forecast_points": 0},
+                    "meta": {"history_points": 0, "forecast_points": 0, **empty_time_meta},
                 }
-            history = get_counts_timeseries(conn, filters, granularity, limit_history)
+            filters_to_use, time_meta = _filters_with_anchored_window(conn, filters)
+            history = get_counts_timeseries(conn, filters_to_use, granularity, limit_history)
         forecast_list = forecast_counts(
             history,
             granularity,
@@ -171,7 +247,11 @@ def forecast(
         "model": {"name": model, "window": window, "alpha": alpha, "horizon": effective_horizon},
         "history": history,
         "forecast": forecast_list,
-        "meta": {"history_points": len(history), "forecast_points": len(forecast_list)},
+        "meta": {
+            "history_points": len(history),
+            "forecast_points": len(forecast_list),
+            **time_meta,
+        },
     }
 
 
@@ -202,8 +282,17 @@ def trends(
     filters: ViolationFilters = Depends(get_violation_filters),
 ) -> dict[str, Any]:
     """
-    Return explainable trend metrics for violation counts (current filters + bbox).
+    Return explainable trend metrics for violation counts (current filters + bbox). Phase 4.1: anchored window + meta.
     """
+    empty_time_meta = build_time_window_meta(
+        data_min_ts=None,
+        data_max_ts=None,
+        anchor_ts=None,
+        effective_start_ts=None,
+        effective_end_ts=None,
+        window_source="anchored",
+        message="No connection.",
+    )
     engine = get_engine()
     if engine is None:
         return {
@@ -220,7 +309,7 @@ def trends(
                 "insufficient_data": True,
                 "points_used": 0,
             },
-            "meta": {"history_points": 0},
+            "meta": {"history_points": 0, **empty_time_meta},
         }
 
     try:
@@ -240,9 +329,10 @@ def trends(
                         "insufficient_data": True,
                         "points_used": 0,
                     },
-                    "meta": {"history_points": 0},
+                    "meta": {"history_points": 0, **empty_time_meta},
                 }
-            history = get_counts_timeseries(conn, filters, granularity, limit_history)
+            filters_to_use, time_meta = _filters_with_anchored_window(conn, filters)
+            history = get_counts_timeseries(conn, filters_to_use, granularity, limit_history)
         trends_result = compute_trends(history, window=window, anomaly_z=anomaly_z)
     except Exception:
         logger.exception("predict/trends failed")
@@ -251,7 +341,7 @@ def trends(
     return {
         "granularity": granularity,
         "trends": trends_result,
-        "meta": {"history_points": len(history)},
+        "meta": {"history_points": len(history), **time_meta},
     }
 
 
@@ -287,6 +377,15 @@ def hotspots_grid(
     Return grid cells with recent_count, baseline_count, risk score (0-100), and risk_level.
     Uses bbox + filters; bbox is recommended for performance.
     """
+    empty_time_meta = build_time_window_meta(
+        data_min_ts=None,
+        data_max_ts=None,
+        anchor_ts=None,
+        effective_start_ts=None,
+        effective_end_ts=None,
+        window_source="anchored",
+        message="No connection.",
+    )
     engine = get_engine()
     if engine is None:
         return {
@@ -297,6 +396,7 @@ def hotspots_grid(
                 "recent_days": recent_days,
                 "baseline_days": baseline_days,
                 "points": 0,
+                **empty_time_meta,
             },
         }
 
@@ -311,6 +411,7 @@ def hotspots_grid(
                         "recent_days": recent_days,
                         "baseline_days": baseline_days,
                         "points": 0,
+                        **empty_time_meta,
                     },
                 }
             result = get_hotspot_grid(
@@ -359,7 +460,15 @@ def risk(
     Falls back to MA forecast when insufficient data (< 30 points).
     """
     effective_horizon = horizon if horizon is not None else (24 if granularity == "hour" else 7)
-
+    empty_time_meta = build_time_window_meta(
+        data_min_ts=None,
+        data_max_ts=None,
+        anchor_ts=None,
+        effective_start_ts=None,
+        effective_end_ts=None,
+        window_source="anchored",
+        message="No connection.",
+    )
     engine = get_engine()
     if engine is None:
         return {
@@ -369,7 +478,7 @@ def risk(
             "metrics": {"mae": 0.0, "mape": 0.0, "test_points": 0},
             "explain": {"top_positive": [], "top_negative": []},
             "forecast": [],
-            "meta": {"fallback_used": False, "insufficient_data": True},
+            "meta": {"fallback_used": False, "insufficient_data": True, **empty_time_meta},
         }
 
     try:
@@ -382,9 +491,10 @@ def risk(
                     "metrics": {"mae": 0.0, "mape": 0.0, "test_points": 0},
                     "explain": {"top_positive": [], "top_negative": []},
                     "forecast": [],
-                    "meta": {"fallback_used": False, "insufficient_data": True},
+                    "meta": {"fallback_used": False, "insufficient_data": True, **empty_time_meta},
                 }
-            history = get_counts_timeseries(conn, filters, granularity, limit_history)
+            filters_to_use, time_meta = _filters_with_anchored_window(conn, filters)
+            history = get_counts_timeseries(conn, filters_to_use, granularity, limit_history)
 
         X_rows, y_list, _ = build_training_rows(history, granularity)
         fitted, train_meta = train_poisson_model(X_rows, y_list, granularity, alpha=alpha)
@@ -408,7 +518,7 @@ def risk(
                 "metrics": {"mae": 0.0, "mape": 0.0, "test_points": 0},
                 "explain": {"top_positive": [], "top_negative": []},
                 "forecast": forecast_out,
-                "meta": {"fallback_used": True, "insufficient_data": True},
+                "meta": {"fallback_used": True, "insufficient_data": True, **time_meta},
             }
 
         metrics = backtest(fitted, X_rows, y_list, granularity)
@@ -426,7 +536,7 @@ def risk(
             "metrics": metrics,
             "explain": explain,
             "forecast": forecast_out,
-            "meta": {"fallback_used": False, "insufficient_data": False},
+            "meta": {"fallback_used": False, "insufficient_data": False, **time_meta},
         }
     except Exception:
         logger.exception("predict/risk failed")

@@ -24,6 +24,32 @@ def test_violations_stats_returns_200_and_expected_keys():
     assert isinstance(data["top_types"], list)
 
 
+def test_violations_stats_meta_contract():
+    """Phase 4.1: GET /violations/stats has top-level meta with data freshness contract (lock for JSON/PS)."""
+    response = client.get("/violations/stats")
+    assert response.status_code == 200
+    data = response.json()
+    assert "meta" in data, "response must have top-level 'meta'"
+    meta = data["meta"]
+    assert meta is not None, "meta must not be null"
+    assert isinstance(meta, dict), "meta must be a dict/object"
+    assert len(meta) > 0, "meta must not be empty"
+    required = ["data_min_ts", "data_max_ts", "anchor_ts", "effective_window", "window_source", "timezone"]
+    for key in required:
+        assert key in meta, f"meta must have key '{key}'"
+    assert meta["window_source"] in ("anchored", "absolute")
+    assert meta["timezone"] == "UTC"
+    ew = meta["effective_window"]
+    assert isinstance(ew, dict), "effective_window must be a dict"
+    assert "start_ts" in ew, "effective_window must have start_ts"
+    assert "end_ts" in ew, "effective_window must have end_ts"
+    # All meta values must be JSON-serializable (str, None, dict with same)
+    for k, v in meta.items():
+        assert v is None or isinstance(v, (str, dict)), f"meta.{k} must be str, dict, or null"
+    for k, v in ew.items():
+        assert v is None or isinstance(v, str), f"effective_window.{k} must be str or null"
+
+
 def test_violations_stats_invalid_hour_start_returns_422():
     """invalid hour_start=-1 returns 422."""
     response = client.get("/violations/stats?hour_start=-1")

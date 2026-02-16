@@ -1,5 +1,7 @@
 """
 GET /aggregations/time/hour — violation counts per hour (0..23), with optional filters.
+GET /aggregations/time/day — violation counts per day.
+Note: Phase 4.1 time-window meta is added to endpoints that already return an object; these return raw lists for backward compatibility.
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy import text

@@ -1,40 +1,19 @@
-"""Hotspot risk scoring grid (Phase 3.3): recent vs baseline window counts."""
+"""Hotspot risk scoring grid (Phase 3.3): recent vs baseline window counts. Phase 4.1: anchor to data_max_ts."""
 
-from datetime import date, datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from app.queries.hotspot_sql import build_hotspot_grid_sql
+from app.utils.time_anchor import (
+    build_time_window_meta,
+    get_data_time_range,
+    to_utc_iso,
+)
 from app.utils.violation_filters import ViolationFilters, build_violation_where
 
 METERS_PER_DEGREE_APPROX = 111320.0
-
-
-def _anchor_end_from_db(conn: Connection, filters: ViolationFilters) -> datetime | None:
-    """When no end filter is set, use MAX(occurred_at) so static datasets still return hotspots."""
-    no_time = ViolationFilters(
-        start=None,
-        end=None,
-        hour_start=filters.hour_start,
-        hour_end=filters.hour_end,
-        violation_type=filters.violation_type,
-        bbox=filters.bbox,
-    )
-    where_sql, params = build_violation_where(no_time)
-    row = conn.execute(
-        text("SELECT MAX(occurred_at) AS anchor FROM violations" + where_sql),
-        params,
-    ).fetchone()
-    if not row or row[0] is None:
-        return None
-    anchor = row[0]
-    if isinstance(anchor, date) and not isinstance(anchor, datetime):
-        anchor = datetime.combine(anchor, datetime.min.time())
-    elif getattr(anchor, "tzinfo", None) is not None:
-        anchor = anchor.replace(tzinfo=None)
-    return anchor
 
 
 def get_hotspot_grid(
@@ -47,27 +26,40 @@ def get_hotspot_grid(
 ) -> dict[str, Any]:
     """
     Return grid cells with recent_count, baseline_count, ratio, score (0-100), risk_level.
-
-    anchor_end = filters.end, or MAX(occurred_at) when end is not set (for static datasets).
-    recent = [anchor_end - recent_days, anchor_end]; baseline = [baseline_end - baseline_days, baseline_end].
-    Clamps to filters.start when set.
+    Phase 4.1: anchor_end = filters.end or data_max_ts (same filter scope). Recent/baseline windows use that anchor.
     """
     grid_size_deg = cell_m / METERS_PER_DEGREE_APPROX
+    data_min_ts, data_max_ts = get_data_time_range(conn, filters)
+
     if filters.end is not None:
         anchor_end = filters.end
+        window_source = "absolute"
     else:
-        anchor_end = _anchor_end_from_db(conn, filters)
-        if anchor_end is None:
-            return {
-                "cells": [],
-                "meta": {
-                    "cell_m": cell_m,
-                    "grid_size_deg": round(grid_size_deg, 8),
-                    "recent_days": recent_days,
-                    "baseline_days": baseline_days,
-                    "points": 0,
-                },
-            }
+        anchor_end = data_max_ts
+        window_source = "anchored"
+
+    if anchor_end is None:
+        time_meta = build_time_window_meta(
+            data_min_ts=None,
+            data_max_ts=None,
+            anchor_ts=None,
+            effective_start_ts=None,
+            effective_end_ts=None,
+            window_source="anchored",
+            message="No data for the given filter scope.",
+        )
+        return {
+            "cells": [],
+            "meta": {
+                "cell_m": cell_m,
+                "grid_size_deg": round(grid_size_deg, 8),
+                "recent_days": recent_days,
+                "baseline_days": baseline_days,
+                "points": 0,
+                **time_meta,
+            },
+        }
+
     recent_start = anchor_end - timedelta(days=recent_days)
     baseline_end = recent_start
     baseline_start = baseline_end - timedelta(days=baseline_days)
@@ -75,6 +67,9 @@ def get_hotspot_grid(
     if filters.start is not None:
         baseline_start = max(baseline_start, filters.start)
         recent_start = max(recent_start, filters.start)
+    if data_min_ts is not None:
+        baseline_start = max(baseline_start, data_min_ts)
+        recent_start = max(recent_start, data_min_ts)
 
     recent_filters = ViolationFilters(
         start=recent_start,
@@ -108,16 +103,29 @@ def get_hotspot_grid(
     sql = build_hotspot_grid_sql(where_recent, where_baseline)
     rows = conn.execute(sql, params).fetchall()
 
+    time_meta = build_time_window_meta(
+        data_min_ts=data_min_ts,
+        data_max_ts=data_max_ts,
+        anchor_ts=anchor_end,
+        effective_start_ts=baseline_start,
+        effective_end_ts=anchor_end,
+        window_source=window_source,
+        effective_window_extra={
+            "recent": {"start_ts": to_utc_iso(recent_start), "end_ts": to_utc_iso(anchor_end)},
+            "baseline": {"start_ts": to_utc_iso(baseline_start), "end_ts": to_utc_iso(baseline_end)},
+        },
+    )
+    base_meta = {
+        "cell_m": cell_m,
+        "grid_size_deg": round(grid_size_deg, 8),
+        "recent_days": recent_days,
+        "baseline_days": baseline_days,
+    }
+
     if not rows:
         return {
             "cells": [],
-            "meta": {
-                "cell_m": cell_m,
-                "grid_size_deg": round(grid_size_deg, 8),
-                "recent_days": recent_days,
-                "baseline_days": baseline_days,
-                "points": 0,
-            },
+            "meta": {**base_meta, "points": 0, **time_meta},
         }
 
     ratios = []
@@ -160,11 +168,5 @@ def get_hotspot_grid(
 
     return {
         "cells": cells,
-        "meta": {
-            "cell_m": cell_m,
-            "grid_size_deg": round(grid_size_deg, 8),
-            "recent_days": recent_days,
-            "baseline_days": baseline_days,
-            "points": len(cells),
-        },
+        "meta": {**base_meta, "points": len(cells), **time_meta},
     }
