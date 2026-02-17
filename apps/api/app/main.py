@@ -6,6 +6,7 @@ from sqlalchemy import text
 
 from app.db import get_connection, get_engine
 from app.routers import predict, spatial_aggregations, stats, time_aggregations
+from app.utils.model_registry import get_registry
 
 app = FastAPI(title="Traffic-lyt API")
 app.include_router(stats.router)
@@ -30,6 +31,14 @@ app.add_middleware(
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/internal/cache")
+def internal_cache():
+    """Phase 4.2: Return model registry stats. Guarded by DEBUG=true."""
+    if os.getenv("DEBUG", "").lower() not in ("1", "true", "yes"):
+        return {"error": "disabled", "message": "Set DEBUG=true to enable"}
+    return get_registry().stats()
 
 
 @app.get("/db-check")

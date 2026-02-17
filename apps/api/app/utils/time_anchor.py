@@ -110,6 +110,8 @@ def compute_anchored_window(
       start_ts = end_ts - relative_days (if given) else data_min_ts.
     """
     if data_max_ts is None:
+        if filters.start is not None and filters.end is not None:
+            return (filters.start, filters.end, None, "absolute")
         return (None, None, None, "anchored")
 
     if filters.start is not None and filters.end is not None:

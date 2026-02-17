@@ -38,6 +38,8 @@ Example curl (risk / Poisson regression):
   # curl "http://localhost:8000/predict/risk?granularity=day&horizon=7&violation_type=NO%20PARKING&hour_start=22&hour_end=3&bbox=-74.1,40.6,-73.9,40.8&end=2024-12-28T23:59:59"
 """
 import logging
+import time
+from datetime import datetime as dt_parse
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -56,12 +58,17 @@ from app.predict.regression import (
 from app.predict.timeseries import get_counts_timeseries
 from app.predict.trends import compute_trends
 from app.queries.predict_sql import Granularity
+from app.utils.model_registry import get_registry, make_model_key, short_hash
+from app.utils.signature import request_signature
 from app.utils.time_anchor import (
     build_time_window_meta,
     compute_anchored_window,
     get_data_time_range,
 )
 from app.utils.violation_filters import ViolationFilters, get_violation_filters
+
+RISK_CACHE_TTL_SECONDS = 600
+FORECAST_CACHE_TTL_SECONDS = 120
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/predict", tags=["predict"])
@@ -209,13 +216,14 @@ def forecast(
         message="No database connection.",
     )
     engine = get_engine()
+    _no_conn_forecast_cache = {"hit": False, "key_hash": None, "ttl_seconds": FORECAST_CACHE_TTL_SECONDS}
     if engine is None:
         return {
             "granularity": granularity,
             "model": {"name": model, "window": window, "alpha": alpha, "horizon": effective_horizon},
             "history": [],
             "forecast": [],
-            "meta": {"history_points": 0, "forecast_points": 0, **empty_time_meta},
+            "meta": {"history_points": 0, "forecast_points": 0, "model_cache": _no_conn_forecast_cache, **empty_time_meta},
         }
 
     try:
@@ -226,9 +234,61 @@ def forecast(
                     "model": {"name": model, "window": window, "alpha": alpha, "horizon": effective_horizon},
                     "history": [],
                     "forecast": [],
-                    "meta": {"history_points": 0, "forecast_points": 0, **empty_time_meta},
+                    "meta": {"history_points": 0, "forecast_points": 0, "model_cache": _no_conn_forecast_cache, **empty_time_meta},
                 }
             filters_to_use, time_meta = _filters_with_anchored_window(conn, filters)
+            anchor_ts_str = time_meta.get("anchor_ts") or time_meta.get("data_max_ts")
+            sig = request_signature(
+                endpoint_name="forecast",
+                anchor_ts=anchor_ts_str,
+                granularity=granularity,
+                bbox=filters.bbox,
+                violation_type=filters.violation_type,
+                hour_start=filters.hour_start,
+                hour_end=filters.hour_end,
+                start_iso=filters.start.isoformat() if filters.start else None,
+                end_iso=filters.end.isoformat() if filters.end else None,
+                model_params={
+                    "model": model,
+                    "window": window,
+                    "alpha": alpha,
+                    "horizon": effective_horizon,
+                    "limit_history": limit_history,
+                },
+            )
+            model_key = make_model_key(
+                "forecast",
+                sig,
+                anchor_ts_str,
+                granularity,
+                model_params={"model": model, "window": window, "alpha": alpha, "horizon": effective_horizon, "limit_history": limit_history},
+            )
+            registry = get_registry()
+            t0 = time.perf_counter()
+            cached = registry.get(model_key)
+            if cached and isinstance(cached.get("history"), list) and isinstance(cached.get("forecast"), list):
+                elapsed_ms = round((time.perf_counter() - t0) * 1000)
+                logger.info(
+                    "model_cache_hit endpoint=forecast key_hash=%s elapsed_ms=%d",
+                    short_hash(model_key),
+                    elapsed_ms,
+                )
+                return {
+                    "granularity": granularity,
+                    "model": {"name": model, "window": window, "alpha": alpha, "horizon": effective_horizon},
+                    "history": cached["history"],
+                    "forecast": cached["forecast"],
+                    "meta": {
+                        "history_points": len(cached["history"]),
+                        "forecast_points": len(cached["forecast"]),
+                        "model_cache": {
+                            "hit": True,
+                            "key_hash": short_hash(model_key),
+                            "ttl_seconds": FORECAST_CACHE_TTL_SECONDS,
+                        },
+                        **time_meta,
+                    },
+                }
             history = get_counts_timeseries(conn, filters_to_use, granularity, limit_history)
         forecast_list = forecast_counts(
             history,
@@ -237,6 +297,19 @@ def forecast(
             model=model,
             window=window,
             alpha=alpha,
+        )
+        registry = get_registry()
+        registry.set(
+            model_key,
+            {"history": history, "forecast": forecast_list},
+            ttl_seconds=FORECAST_CACHE_TTL_SECONDS,
+            meta={"endpoint": "forecast", "granularity": granularity},
+        )
+        elapsed_ms = round((time.perf_counter() - t0) * 1000)
+        logger.info(
+            "model_cache_miss endpoint=forecast key_hash=%s elapsed_ms=%d",
+            short_hash(model_key),
+            elapsed_ms,
         )
     except Exception:
         logger.exception("predict/forecast failed")
@@ -250,6 +323,11 @@ def forecast(
         "meta": {
             "history_points": len(history),
             "forecast_points": len(forecast_list),
+            "model_cache": {
+                "hit": False,
+                "key_hash": short_hash(model_key),
+                "ttl_seconds": FORECAST_CACHE_TTL_SECONDS,
+            },
             **time_meta,
         },
     }
@@ -470,6 +548,7 @@ def risk(
         message="No connection.",
     )
     engine = get_engine()
+    _no_conn_model_cache = {"hit": False, "key_hash": None, "ttl_seconds": RISK_CACHE_TTL_SECONDS}
     if engine is None:
         return {
             "granularity": granularity,
@@ -478,7 +557,7 @@ def risk(
             "metrics": {"mae": 0.0, "mape": 0.0, "test_points": 0},
             "explain": {"top_positive": [], "top_negative": []},
             "forecast": [],
-            "meta": {"fallback_used": False, "insufficient_data": True, **empty_time_meta},
+            "meta": {"fallback_used": False, "insufficient_data": True, "model_cache": _no_conn_model_cache, **empty_time_meta},
         }
 
     try:
@@ -491,10 +570,77 @@ def risk(
                     "metrics": {"mae": 0.0, "mape": 0.0, "test_points": 0},
                     "explain": {"top_positive": [], "top_negative": []},
                     "forecast": [],
-                    "meta": {"fallback_used": False, "insufficient_data": True, **empty_time_meta},
+                    "meta": {"fallback_used": False, "insufficient_data": True, "model_cache": _no_conn_model_cache, **empty_time_meta},
                 }
             filters_to_use, time_meta = _filters_with_anchored_window(conn, filters)
             history = get_counts_timeseries(conn, filters_to_use, granularity, limit_history)
+
+        anchor_ts_str = time_meta.get("anchor_ts") or time_meta.get("data_max_ts")
+        sig = request_signature(
+            endpoint_name="risk",
+            anchor_ts=anchor_ts_str,
+            granularity=granularity,
+            bbox=filters.bbox,
+            violation_type=filters.violation_type,
+            hour_start=filters.hour_start,
+            hour_end=filters.hour_end,
+            start_iso=filters.start.isoformat() if filters.start else None,
+            end_iso=filters.end.isoformat() if filters.end else None,
+            model_params={
+                "alpha": alpha,
+                "horizon": effective_horizon,
+                "limit_history": limit_history,
+            },
+        )
+        model_key = make_model_key(
+            "risk",
+            sig,
+            anchor_ts_str,
+            granularity,
+            model_params={"alpha": alpha, "horizon": effective_horizon, "limit_history": limit_history},
+        )
+        registry = get_registry()
+        t0 = time.perf_counter()
+        cached = registry.get(model_key)
+
+        if cached and cached.get("fitted") is not None:
+            fitted = cached["fitted"]
+            explain = cached.get("explain") or {"top_positive": [], "top_negative": []}
+            metrics = cached.get("metrics") or {"mae": 0.0, "mape": 0.0, "test_points": 0}
+            last_ts_iso = cached.get("last_ts_iso")
+            if last_ts_iso:
+                if last_ts_iso.endswith("Z"):
+                    last_ts_iso = last_ts_iso[:-1] + "+00:00"
+                last_ts = dt_parse.fromisoformat(last_ts_iso)
+                if last_ts.tzinfo:
+                    last_ts = last_ts.replace(tzinfo=None)
+                forecast_out = predict_future(fitted, last_ts, granularity, effective_horizon)
+            else:
+                forecast_out = []
+            elapsed_ms = round((time.perf_counter() - t0) * 1000)
+            logger.info(
+                "model_cache_hit endpoint=risk key_hash=%s elapsed_ms=%d",
+                short_hash(model_key),
+                elapsed_ms,
+            )
+            return {
+                "granularity": granularity,
+                "model": {"name": "poisson_regression", "alpha": alpha, "horizon": effective_horizon},
+                "history_points": cached.get("history_points") or 0,
+                "metrics": metrics,
+                "explain": explain,
+                "forecast": forecast_out,
+                "meta": {
+                    "fallback_used": False,
+                    "insufficient_data": False,
+                    "model_cache": {
+                        "hit": True,
+                        "key_hash": short_hash(model_key),
+                        "ttl_seconds": RISK_CACHE_TTL_SECONDS,
+                    },
+                    **time_meta,
+                },
+            }
 
         X_rows, y_list, _ = build_training_rows(history, granularity)
         fitted, train_meta = train_poisson_model(X_rows, y_list, granularity, alpha=alpha)
@@ -511,6 +657,12 @@ def risk(
                 {"ts": f["ts"], "expected": float(f["count"]), "expected_rounded": int(f["count"])}
                 for f in fallback
             ]
+            elapsed_ms = round((time.perf_counter() - t0) * 1000)
+            logger.info(
+                "model_cache_miss endpoint=risk key_hash=%s elapsed_ms=%d",
+                short_hash(model_key),
+                elapsed_ms,
+            )
             return {
                 "granularity": granularity,
                 "model": {"name": "poisson_regression", "alpha": alpha, "horizon": effective_horizon},
@@ -518,7 +670,12 @@ def risk(
                 "metrics": {"mae": 0.0, "mape": 0.0, "test_points": 0},
                 "explain": {"top_positive": [], "top_negative": []},
                 "forecast": forecast_out,
-                "meta": {"fallback_used": True, "insufficient_data": True, **time_meta},
+                "meta": {
+                    "fallback_used": True,
+                    "insufficient_data": True,
+                    "model_cache": {"hit": False, "key_hash": short_hash(model_key), "ttl_seconds": RISK_CACHE_TTL_SECONDS},
+                    **time_meta,
+                },
             }
 
         metrics = backtest(fitted, X_rows, y_list, granularity)
@@ -529,6 +686,26 @@ def risk(
             forecast_out = predict_future(fitted, last_ts, granularity, effective_horizon)
         explain = explain_coefficients(fitted, top_k=8)
 
+        registry.set(
+            model_key,
+            {
+                "fitted": fitted,
+                "train_meta": train_meta,
+                "last_ts_iso": last_ts.isoformat() if last_ts else None,
+                "explain": explain,
+                "metrics": metrics,
+                "history_points": len(history),
+                "granularity": granularity,
+            },
+            ttl_seconds=RISK_CACHE_TTL_SECONDS,
+            meta={"endpoint": "risk", "granularity": granularity},
+        )
+        elapsed_ms = round((time.perf_counter() - t0) * 1000)
+        logger.info(
+            "model_cache_miss endpoint=risk key_hash=%s elapsed_ms=%d",
+            short_hash(model_key),
+            elapsed_ms,
+        )
         return {
             "granularity": granularity,
             "model": {"name": "poisson_regression", "alpha": alpha, "horizon": effective_horizon},
@@ -536,7 +713,16 @@ def risk(
             "metrics": metrics,
             "explain": explain,
             "forecast": forecast_out,
-            "meta": {"fallback_used": False, "insufficient_data": False, **time_meta},
+            "meta": {
+                "fallback_used": False,
+                "insufficient_data": False,
+                "model_cache": {
+                    "hit": False,
+                    "key_hash": short_hash(model_key),
+                    "ttl_seconds": RISK_CACHE_TTL_SECONDS,
+                },
+                **time_meta,
+            },
         }
     except Exception:
         logger.exception("predict/risk failed")
