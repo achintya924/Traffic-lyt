@@ -8,6 +8,7 @@ from app.db import get_connection, get_engine
 from app.routers import predict, spatial_aggregations, stats, time_aggregations
 from app.utils.model_registry import get_registry
 from app.utils.response_cache import get_response_cache
+from app.utils.timing_middleware import TimingMiddleware
 
 app = FastAPI(title="Traffic-lyt API")
 app.include_router(stats.router)
@@ -27,6 +28,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(TimingMiddleware)  # Phase 4.5: request timing + slow-request WARNING
 
 
 @app.get("/health")
