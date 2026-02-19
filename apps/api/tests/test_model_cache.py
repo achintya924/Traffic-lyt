@@ -56,7 +56,7 @@ def test_risk_meta_has_model_cache():
 
 
 def test_risk_second_request_cache_hit():
-    """Two identical /predict/risk requests: second response has model_cache.hit true."""
+    """Two identical /predict/risk requests: second response has cache hit (Phase 4.3: response_cache, else model_cache)."""
     params = {"granularity": "hour", "horizon": 24, "bbox": "-74.1,40.6,-73.9,40.8"}
     r1 = client.get("/predict/risk", params=params)
     assert r1.status_code == 200
@@ -67,7 +67,8 @@ def test_risk_second_request_cache_hit():
     assert r2.status_code == 200
     meta2 = r2.json().get("meta", {})
     assert meta1.get("model_cache", {}).get("key_hash") == meta2.get("model_cache", {}).get("key_hash")
-    assert meta2.get("model_cache", {}).get("hit") is True
+    # Phase 4.3: response cache short-circuits first, so second request has response_cache.hit
+    assert meta2.get("response_cache", {}).get("hit") is True or meta2.get("model_cache", {}).get("hit") is True
 
 
 def test_risk_different_bbox_cache_miss():
@@ -115,7 +116,7 @@ def test_forecast_meta_has_model_cache():
 
 
 def test_forecast_second_request_cache_hit():
-    """Two identical /predict/forecast requests: second has model_cache.hit true."""
+    """Two identical /predict/forecast requests: second has cache hit (Phase 4.3: response_cache, else model_cache)."""
     params = {"granularity": "hour", "horizon": 24, "bbox": "-74.1,40.6,-73.9,40.8"}
     r1 = client.get("/predict/forecast", params=params)
     assert r1.status_code == 200
@@ -123,4 +124,5 @@ def test_forecast_second_request_cache_hit():
         pytest.skip("No DB or no data: key_hash is None")
     r2 = client.get("/predict/forecast", params=params)
     assert r2.status_code == 200
-    assert r2.json().get("meta", {}).get("model_cache", {}).get("hit") is True
+    meta2 = r2.json().get("meta", {})
+    assert meta2.get("response_cache", {}).get("hit") is True or meta2.get("model_cache", {}).get("hit") is True

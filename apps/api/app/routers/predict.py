@@ -59,7 +59,9 @@ from app.predict.timeseries import get_counts_timeseries
 from app.predict.trends import compute_trends
 from app.queries.predict_sql import Granularity
 from app.utils.model_registry import get_registry, make_model_key, short_hash
-from app.utils.signature import request_signature
+from app.utils.rate_limiter import rate_limit
+from app.utils.response_cache import get_response_cache, make_response_key
+from app.utils.signature import request_signature, request_signature_hotspots
 from app.utils.time_anchor import (
     build_time_window_meta,
     compute_anchored_window,
@@ -69,6 +71,9 @@ from app.utils.violation_filters import ViolationFilters, get_violation_filters
 
 RISK_CACHE_TTL_SECONDS = 600
 FORECAST_CACHE_TTL_SECONDS = 120
+RISK_RESPONSE_TTL = 60
+FORECAST_RESPONSE_TTL = 45
+HOTSPOTS_RESPONSE_TTL = 60
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/predict", tags=["predict"])
@@ -175,7 +180,7 @@ def timeseries(
     }
 
 
-@router.get("/forecast")
+@router.get("/forecast", dependencies=[Depends(rate_limit("predict"))])
 def forecast(
     granularity: Granularity = Query(
         "hour",
@@ -217,13 +222,14 @@ def forecast(
     )
     engine = get_engine()
     _no_conn_forecast_cache = {"hit": False, "key_hash": None, "ttl_seconds": FORECAST_CACHE_TTL_SECONDS}
+    _no_conn_forecast_rc = {"hit": False, "key_hash": None, "ttl_seconds": FORECAST_RESPONSE_TTL}
     if engine is None:
         return {
             "granularity": granularity,
             "model": {"name": model, "window": window, "alpha": alpha, "horizon": effective_horizon},
             "history": [],
             "forecast": [],
-            "meta": {"history_points": 0, "forecast_points": 0, "model_cache": _no_conn_forecast_cache, **empty_time_meta},
+            "meta": {"history_points": 0, "forecast_points": 0, "model_cache": _no_conn_forecast_cache, "response_cache": _no_conn_forecast_rc, **empty_time_meta},
         }
 
     try:
@@ -234,7 +240,7 @@ def forecast(
                     "model": {"name": model, "window": window, "alpha": alpha, "horizon": effective_horizon},
                     "history": [],
                     "forecast": [],
-                    "meta": {"history_points": 0, "forecast_points": 0, "model_cache": _no_conn_forecast_cache, **empty_time_meta},
+                    "meta": {"history_points": 0, "forecast_points": 0, "model_cache": _no_conn_forecast_cache, "response_cache": _no_conn_forecast_rc, **empty_time_meta},
                 }
             filters_to_use, time_meta = _filters_with_anchored_window(conn, filters)
             anchor_ts_str = time_meta.get("anchor_ts") or time_meta.get("data_max_ts")
@@ -263,6 +269,13 @@ def forecast(
                 granularity,
                 model_params={"model": model, "window": window, "alpha": alpha, "horizon": effective_horizon, "limit_history": limit_history},
             )
+            resp_key = make_response_key("forecast", sig, anchor_ts_str, time_meta.get("effective_window"))
+            resp_cache = get_response_cache()
+            resp_cached = resp_cache.get(resp_key)
+            if resp_cached is not None:
+                out = dict(resp_cached)
+                out["meta"] = {**resp_cached.get("meta", {}), "response_cache": {"hit": True, "key_hash": short_hash(resp_key), "ttl_seconds": FORECAST_RESPONSE_TTL}}
+                return out
             registry = get_registry()
             t0 = time.perf_counter()
             cached = registry.get(model_key)
@@ -273,7 +286,7 @@ def forecast(
                     short_hash(model_key),
                     elapsed_ms,
                 )
-                return {
+                payload = {
                     "granularity": granularity,
                     "model": {"name": model, "window": window, "alpha": alpha, "horizon": effective_horizon},
                     "history": cached["history"],
@@ -286,9 +299,12 @@ def forecast(
                             "key_hash": short_hash(model_key),
                             "ttl_seconds": FORECAST_CACHE_TTL_SECONDS,
                         },
+                        "response_cache": {"hit": False, "key_hash": short_hash(resp_key), "ttl_seconds": FORECAST_RESPONSE_TTL},
                         **time_meta,
                     },
                 }
+                resp_cache.set(resp_key, payload, FORECAST_RESPONSE_TTL)
+                return payload
             history = get_counts_timeseries(conn, filters_to_use, granularity, limit_history)
         forecast_list = forecast_counts(
             history,
@@ -315,7 +331,7 @@ def forecast(
         logger.exception("predict/forecast failed")
         raise HTTPException(status_code=500, detail="predict/forecast failed")
 
-    return {
+    payload = {
         "granularity": granularity,
         "model": {"name": model, "window": window, "alpha": alpha, "horizon": effective_horizon},
         "history": history,
@@ -328,12 +344,15 @@ def forecast(
                 "key_hash": short_hash(model_key),
                 "ttl_seconds": FORECAST_CACHE_TTL_SECONDS,
             },
+            "response_cache": {"hit": False, "key_hash": short_hash(resp_key), "ttl_seconds": FORECAST_RESPONSE_TTL},
             **time_meta,
         },
     }
+    resp_cache.set(resp_key, payload, FORECAST_RESPONSE_TTL)
+    return payload
 
 
-@router.get("/trends")
+@router.get("/trends", dependencies=[Depends(rate_limit("predict"))])
 def trends(
     granularity: Granularity = Query(
         "day",
@@ -423,7 +442,7 @@ def trends(
     }
 
 
-@router.get("/hotspots/grid")
+@router.get("/hotspots/grid", dependencies=[Depends(rate_limit("predict"))])
 def hotspots_grid(
     cell_m: int = Query(
         250,
@@ -465,6 +484,7 @@ def hotspots_grid(
         message="No connection.",
     )
     engine = get_engine()
+    _no_conn_hotspots_rc = {"hit": False, "key_hash": None, "ttl_seconds": HOTSPOTS_RESPONSE_TTL}
     if engine is None:
         return {
             "cells": [],
@@ -474,6 +494,7 @@ def hotspots_grid(
                 "recent_days": recent_days,
                 "baseline_days": baseline_days,
                 "points": 0,
+                "response_cache": _no_conn_hotspots_rc,
                 **empty_time_meta,
             },
         }
@@ -489,9 +510,44 @@ def hotspots_grid(
                         "recent_days": recent_days,
                         "baseline_days": baseline_days,
                         "points": 0,
+                        "response_cache": _no_conn_hotspots_rc,
                         **empty_time_meta,
                     },
                 }
+            data_min_ts, data_max_ts = get_data_time_range(conn, filters)
+            effective_start, effective_end, anchor_ts, _ = compute_anchored_window(
+                filters, data_min_ts, data_max_ts
+            )
+            time_meta = build_time_window_meta(
+                data_min_ts=data_min_ts,
+                data_max_ts=data_max_ts,
+                anchor_ts=anchor_ts,
+                effective_start_ts=effective_start,
+                effective_end_ts=effective_end,
+                window_source="anchored",
+                message="No data for the given filter scope." if data_max_ts is None else None,
+            )
+            anchor_ts_str = time_meta.get("anchor_ts") or time_meta.get("data_max_ts")
+            sig = request_signature_hotspots(
+                anchor_ts=anchor_ts_str,
+                cell_m=cell_m,
+                recent_days=recent_days,
+                baseline_days=baseline_days,
+                limit=limit,
+                bbox=filters.bbox,
+                violation_type=filters.violation_type,
+                hour_start=filters.hour_start,
+                hour_end=filters.hour_end,
+                start_iso=filters.start.isoformat() if filters.start else None,
+                end_iso=filters.end.isoformat() if filters.end else None,
+            )
+            resp_key = make_response_key("hotspots_grid", sig, anchor_ts_str, time_meta.get("effective_window"))
+            resp_cache = get_response_cache()
+            resp_cached = resp_cache.get(resp_key)
+            if resp_cached is not None:
+                out = dict(resp_cached)
+                out["meta"] = {**resp_cached.get("meta", {}), "response_cache": {"hit": True, "key_hash": short_hash(resp_key), "ttl_seconds": HOTSPOTS_RESPONSE_TTL}}
+                return out
             result = get_hotspot_grid(
                 conn,
                 filters,
@@ -500,6 +556,9 @@ def hotspots_grid(
                 baseline_days=baseline_days,
                 limit=limit,
             )
+            result = dict(result)
+            result["meta"] = {**result.get("meta", {}), "response_cache": {"hit": False, "key_hash": short_hash(resp_key), "ttl_seconds": HOTSPOTS_RESPONSE_TTL}}
+            resp_cache.set(resp_key, result, HOTSPOTS_RESPONSE_TTL)
     except Exception:
         logger.exception("predict/hotspots/grid failed")
         raise HTTPException(status_code=500, detail="predict/hotspots/grid failed")
@@ -507,7 +566,7 @@ def hotspots_grid(
     return result
 
 
-@router.get("/risk")
+@router.get("/risk", dependencies=[Depends(rate_limit("predict"))])
 def risk(
     granularity: Granularity = Query(
         "hour",
@@ -599,6 +658,14 @@ def risk(
             granularity,
             model_params={"alpha": alpha, "horizon": effective_horizon, "limit_history": limit_history},
         )
+        resp_key = make_response_key("risk", sig, anchor_ts_str, time_meta.get("effective_window"))
+        resp_cache = get_response_cache()
+        resp_cached = resp_cache.get(resp_key)
+        if resp_cached is not None:
+            out = dict(resp_cached)
+            out["meta"] = {**resp_cached.get("meta", {}), "response_cache": {"hit": True, "key_hash": short_hash(resp_key), "ttl_seconds": RISK_RESPONSE_TTL}}
+            return out
+
         registry = get_registry()
         t0 = time.perf_counter()
         cached = registry.get(model_key)
@@ -623,7 +690,7 @@ def risk(
                 short_hash(model_key),
                 elapsed_ms,
             )
-            return {
+            payload = {
                 "granularity": granularity,
                 "model": {"name": "poisson_regression", "alpha": alpha, "horizon": effective_horizon},
                 "history_points": cached.get("history_points") or 0,
@@ -638,9 +705,12 @@ def risk(
                         "key_hash": short_hash(model_key),
                         "ttl_seconds": RISK_CACHE_TTL_SECONDS,
                     },
+                    "response_cache": {"hit": False, "key_hash": short_hash(resp_key), "ttl_seconds": RISK_RESPONSE_TTL},
                     **time_meta,
                 },
             }
+            resp_cache.set(resp_key, payload, RISK_RESPONSE_TTL)
+            return payload
 
         X_rows, y_list, _ = build_training_rows(history, granularity)
         fitted, train_meta = train_poisson_model(X_rows, y_list, granularity, alpha=alpha)
@@ -663,7 +733,7 @@ def risk(
                 short_hash(model_key),
                 elapsed_ms,
             )
-            return {
+            payload = {
                 "granularity": granularity,
                 "model": {"name": "poisson_regression", "alpha": alpha, "horizon": effective_horizon},
                 "history_points": len(history),
@@ -674,9 +744,12 @@ def risk(
                     "fallback_used": True,
                     "insufficient_data": True,
                     "model_cache": {"hit": False, "key_hash": short_hash(model_key), "ttl_seconds": RISK_CACHE_TTL_SECONDS},
+                    "response_cache": {"hit": False, "key_hash": short_hash(resp_key), "ttl_seconds": RISK_RESPONSE_TTL},
                     **time_meta,
                 },
             }
+            resp_cache.set(resp_key, payload, RISK_RESPONSE_TTL)
+            return payload
 
         metrics = backtest(fitted, X_rows, y_list, granularity)
         last_ts = get_last_ts_from_history(history)
@@ -706,7 +779,7 @@ def risk(
             short_hash(model_key),
             elapsed_ms,
         )
-        return {
+        payload = {
             "granularity": granularity,
             "model": {"name": "poisson_regression", "alpha": alpha, "horizon": effective_horizon},
             "history_points": len(history),
@@ -721,9 +794,12 @@ def risk(
                     "key_hash": short_hash(model_key),
                     "ttl_seconds": RISK_CACHE_TTL_SECONDS,
                 },
+                "response_cache": {"hit": False, "key_hash": short_hash(resp_key), "ttl_seconds": RISK_RESPONSE_TTL},
                 **time_meta,
             },
         }
+        resp_cache.set(resp_key, payload, RISK_RESPONSE_TTL)
+        return payload
     except Exception:
         logger.exception("predict/risk failed")
         raise HTTPException(status_code=500, detail="predict/risk failed")
