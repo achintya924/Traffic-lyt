@@ -62,6 +62,7 @@ from app.utils.model_registry import get_registry, make_model_key, short_hash
 from app.utils.rate_limiter import rate_limit
 from app.utils.response_cache import get_response_cache, make_response_key
 from app.utils.signature import request_signature, request_signature_hotspots
+from app.utils.predictive_contract import build_eval_meta, format_explainability
 from app.utils.time_anchor import (
     build_time_window_meta,
     compute_anchored_window,
@@ -230,7 +231,15 @@ def forecast(
             "model": {"name": model, "window": window, "alpha": alpha, "horizon": effective_horizon},
             "history": [],
             "forecast": [],
-            "meta": {"history_points": 0, "forecast_points": 0, "model_cache": _no_conn_forecast_cache, "response_cache": _no_conn_forecast_rc, **empty_time_meta},
+            "meta": {
+                "history_points": 0,
+                "forecast_points": 0,
+                "eval": None,
+                "explain": None,
+                "model_cache": _no_conn_forecast_cache,
+                "response_cache": _no_conn_forecast_rc,
+                **empty_time_meta,
+            },
         }
 
     try:
@@ -241,7 +250,15 @@ def forecast(
                     "model": {"name": model, "window": window, "alpha": alpha, "horizon": effective_horizon},
                     "history": [],
                     "forecast": [],
-                    "meta": {"history_points": 0, "forecast_points": 0, "model_cache": _no_conn_forecast_cache, "response_cache": _no_conn_forecast_rc, **empty_time_meta},
+                    "meta": {
+                        "history_points": 0,
+                        "forecast_points": 0,
+                        "eval": None,
+                        "explain": None,
+                        "model_cache": _no_conn_forecast_cache,
+                        "response_cache": _no_conn_forecast_rc,
+                        **empty_time_meta,
+                    },
                 }
             filters_to_use, time_meta = _filters_with_anchored_window(conn, filters)
             anchor_ts_str = time_meta.get("anchor_ts") or time_meta.get("data_max_ts")
@@ -276,7 +293,10 @@ def forecast(
             if resp_cached is not None:
                 request.state.response_cache_hit = True
                 out = dict(resp_cached)
-                out["meta"] = {**resp_cached.get("meta", {}), "response_cache": {"hit": True, "key_hash": short_hash(resp_key), "ttl_seconds": FORECAST_RESPONSE_TTL}}
+                m = {**resp_cached.get("meta", {}), "response_cache": {"hit": True, "key_hash": short_hash(resp_key), "ttl_seconds": FORECAST_RESPONSE_TTL}}
+                m.setdefault("eval", None)
+                m.setdefault("explain", None)
+                out["meta"] = m
                 return out
             registry = get_registry()
             t0 = time.perf_counter()
@@ -297,6 +317,8 @@ def forecast(
                     "meta": {
                         "history_points": len(cached["history"]),
                         "forecast_points": len(cached["forecast"]),
+                        "eval": None,
+                        "explain": None,
                         "model_cache": {
                             "hit": True,
                             "key_hash": short_hash(model_key),
@@ -342,6 +364,8 @@ def forecast(
         "meta": {
             "history_points": len(history),
             "forecast_points": len(forecast_list),
+            "eval": None,
+            "explain": None,
             "model_cache": {
                 "hit": False,
                 "key_hash": short_hash(model_key),
@@ -438,10 +462,19 @@ def trends(
         logger.exception("predict/trends failed")
         raise HTTPException(status_code=500, detail="predict/trends failed")
 
+    eval_meta = build_eval_meta({
+        "points_used": trends_result.get("points_used", 0),
+        "window": trends_result.get("window"),
+    })
     return {
         "granularity": granularity,
         "trends": trends_result,
-        "meta": {"history_points": len(history), **time_meta},
+        "meta": {
+            "history_points": len(history),
+            "eval": eval_meta,
+            "explain": None,
+            **time_meta,
+        },
     }
 
 
@@ -622,7 +655,14 @@ def risk(
             "metrics": {"mae": 0.0, "mape": 0.0, "test_points": 0},
             "explain": {"top_positive": [], "top_negative": []},
             "forecast": [],
-            "meta": {"fallback_used": False, "insufficient_data": True, "model_cache": _no_conn_model_cache, **empty_time_meta},
+            "meta": {
+                "fallback_used": False,
+                "insufficient_data": True,
+                "eval": None,
+                "explain": format_explainability([], []),
+                "model_cache": _no_conn_model_cache,
+                **empty_time_meta,
+            },
         }
 
     try:
@@ -635,7 +675,14 @@ def risk(
                     "metrics": {"mae": 0.0, "mape": 0.0, "test_points": 0},
                     "explain": {"top_positive": [], "top_negative": []},
                     "forecast": [],
-                    "meta": {"fallback_used": False, "insufficient_data": True, "model_cache": _no_conn_model_cache, **empty_time_meta},
+                    "meta": {
+                        "fallback_used": False,
+                        "insufficient_data": True,
+                        "eval": None,
+                        "explain": format_explainability([], []),
+                        "model_cache": _no_conn_model_cache,
+                        **empty_time_meta,
+                    },
                 }
             filters_to_use, time_meta = _filters_with_anchored_window(conn, filters)
             history = get_counts_timeseries(conn, filters_to_use, granularity, limit_history)
@@ -670,7 +717,12 @@ def risk(
         if resp_cached is not None:
             request.state.response_cache_hit = True
             out = dict(resp_cached)
-            out["meta"] = {**resp_cached.get("meta", {}), "response_cache": {"hit": True, "key_hash": short_hash(resp_key), "ttl_seconds": RISK_RESPONSE_TTL}}
+            meta = {**resp_cached.get("meta", {}), "response_cache": {"hit": True, "key_hash": short_hash(resp_key), "ttl_seconds": RISK_RESPONSE_TTL}}
+            mc = resp_cached.get("metrics") or {}
+            ex = resp_cached.get("explain") or {}
+            meta["eval"] = build_eval_meta({**mc, "horizon": effective_horizon, "granularity": granularity})
+            meta["explain"] = format_explainability(ex.get("top_positive", []), ex.get("top_negative", []))
+            out["meta"] = meta
             return out
 
         registry = get_registry()
@@ -698,6 +750,8 @@ def risk(
                 short_hash(model_key),
                 elapsed_ms,
             )
+            train_pts = cached.get("history_points", 0) - metrics.get("test_points", 0)
+            eval_meta = build_eval_meta({**metrics, "train_points": train_pts, "horizon": effective_horizon, "granularity": granularity})
             payload = {
                 "granularity": granularity,
                 "model": {"name": "poisson_regression", "alpha": alpha, "horizon": effective_horizon},
@@ -708,6 +762,8 @@ def risk(
                 "meta": {
                     "fallback_used": False,
                     "insufficient_data": False,
+                    "eval": eval_meta,
+                    "explain": format_explainability(explain.get("top_positive", []), explain.get("top_negative", [])),
                     "model_cache": {
                         "hit": True,
                         "key_hash": short_hash(model_key),
@@ -751,6 +807,8 @@ def risk(
                 "meta": {
                     "fallback_used": True,
                     "insufficient_data": True,
+                    "eval": None,
+                    "explain": format_explainability([], []),
                     "model_cache": {"hit": False, "key_hash": short_hash(model_key), "ttl_seconds": RISK_CACHE_TTL_SECONDS},
                     "response_cache": {"hit": False, "key_hash": short_hash(resp_key), "ttl_seconds": RISK_RESPONSE_TTL},
                     **time_meta,
@@ -787,6 +845,8 @@ def risk(
             short_hash(model_key),
             elapsed_ms,
         )
+        train_pts = len(history) - metrics.get("test_points", 0)
+        eval_meta = build_eval_meta({**metrics, "train_points": train_pts, "horizon": effective_horizon, "granularity": granularity})
         payload = {
             "granularity": granularity,
             "model": {"name": "poisson_regression", "alpha": alpha, "horizon": effective_horizon},
@@ -797,6 +857,8 @@ def risk(
             "meta": {
                 "fallback_used": False,
                 "insufficient_data": False,
+                "eval": eval_meta,
+                "explain": format_explainability(explain.get("top_positive", []), explain.get("top_negative", [])),
                 "model_cache": {
                     "hit": False,
                     "key_hash": short_hash(model_key),
