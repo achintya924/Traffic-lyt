@@ -3,11 +3,17 @@
 import { useState } from 'react';
 import type { MetaEval, MetaExplain, MetaExplainFeature } from '@/app/lib/types';
 
+export type ForecastMode = '24h' | '30d';
+
 type RiskPanelProps = {
   evalMeta?: MetaEval;
   explainMeta?: MetaExplain;
   forecastTotal?: number;
   horizon?: number;
+  forecastMode: ForecastMode;
+  onForecastModeChange: (m: ForecastMode) => void;
+  forecast30d?: { expectedTotal: number; horizon: number };
+  dataQualityWarning?: boolean;
 };
 
 function ModelEval({ evalMeta }: { evalMeta: MetaEval }) {
@@ -130,11 +136,16 @@ export default function RiskPanel({
   explainMeta,
   forecastTotal,
   horizon,
+  forecastMode,
+  onForecastModeChange,
+  forecast30d,
+  dataQualityWarning,
 }: RiskPanelProps) {
   const hasEval = evalMeta && (evalMeta.metrics?.mae != null || evalMeta.metrics?.mape != null || evalMeta.test_points != null);
   const hasExplain = explainMeta?.features?.length;
+  const hasForecast = forecastMode === '24h' ? forecastTotal != null && horizon != null : forecast30d != null;
 
-  if (!hasEval && !hasExplain && forecastTotal == null) return null;
+  if (!hasEval && !hasExplain && !hasForecast) return null;
 
   return (
     <div
@@ -144,13 +155,66 @@ export default function RiskPanel({
         borderTop: '1px solid #334155',
       }}
     >
-      <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '0.25rem' }}>
-        Risk forecast
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#e2e8f0' }}>Risk forecast</span>
+        <div style={{ display: 'flex', gap: '0.25rem' }}>
+          <button
+            type="button"
+            onClick={() => onForecastModeChange('24h')}
+            style={{
+              padding: '0.15rem 0.4rem',
+              fontSize: '0.7rem',
+              background: forecastMode === '24h' ? '#334155' : 'transparent',
+              color: '#e2e8f0',
+              border: '1px solid #475569',
+              borderRadius: 4,
+              cursor: 'pointer',
+            }}
+          >
+            Next 24h
+          </button>
+          <button
+            type="button"
+            onClick={() => onForecastModeChange('30d')}
+            style={{
+              padding: '0.15rem 0.4rem',
+              fontSize: '0.7rem',
+              background: forecastMode === '30d' ? '#334155' : 'transparent',
+              color: '#e2e8f0',
+              border: '1px solid #475569',
+              borderRadius: 4,
+              cursor: 'pointer',
+            }}
+          >
+            Next 30 days
+          </button>
+        </div>
       </div>
-      {forecastTotal != null && horizon != null && (
+      {forecastMode === '24h' && forecastTotal != null && horizon != null && (
         <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: 0 }}>
           Expected ~{forecastTotal} violations over next {horizon}h
         </p>
+      )}
+      {forecastMode === '30d' && forecast30d && (
+        <>
+          <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: 0 }}>
+            Expected ~{forecast30d.expectedTotal} violations over next {forecast30d.horizon} days
+          </p>
+          {dataQualityWarning && (
+            <p
+              style={{
+                fontSize: '0.7rem',
+                color: '#f59e0b',
+                margin: '0.35rem 0 0',
+                padding: '0.25rem 0.35rem',
+                background: 'rgba(245, 158, 11, 0.15)',
+                borderRadius: 4,
+              }}
+            >
+              Not enough recent data in this view. Zoom out for a more reliable forecast.
+            </p>
+          )}
+        </>
       )}
       <ModelEval evalMeta={evalMeta ?? null} />
       <TopDrivers explainMeta={explainMeta ?? null} />

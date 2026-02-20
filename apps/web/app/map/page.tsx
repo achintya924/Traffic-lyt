@@ -4,9 +4,11 @@ import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   API_BASE,
+  fetchForecast,
   fetchHotspotsGrid,
   fetchRisk,
   fetchStats,
+  type ForecastResponse,
   type HotspotCell,
   type RiskResponse,
   type StatsResponse,
@@ -14,7 +16,7 @@ import {
 import AnchorInfo from '@/app/components/AnchorInfo';
 import CachePill from '@/app/components/CachePill';
 import RiskLegend from '@/app/components/RiskLegend';
-import RiskPanel from '@/app/components/RiskPanel';
+import RiskPanel, { type ForecastMode } from '@/app/components/RiskPanel';
 
 type Violation = {
   id: number;
@@ -82,6 +84,8 @@ export default function MapPage() {
   const [flyToTarget, setFlyToTarget] = useState<[number, number] | null>(null);
   const [riskData, setRiskData] = useState<RiskResponse | null>(null);
   const [riskLoading, setRiskLoading] = useState(false);
+  const [forecast30dData, setForecast30dData] = useState<ForecastResponse | null>(null);
+  const [forecastMode, setForecastMode] = useState<ForecastMode>('24h');
   const [anchorMeta, setAnchorMeta] = useState<StatsResponse['meta'] | null>(null);
   const [cacheHit, setCacheHit] = useState(false);
   const [showLoadingSpinner, setShowLoadingSpinner] = useState(false);
@@ -241,6 +245,15 @@ export default function MapPage() {
       } catch (e) {
         if ((e as { name?: string })?.name === 'AbortError') return;
         setRiskData(null);
+      }
+
+      try {
+        const forecast = await fetchForecast({ bbox, granularity: 'day', horizon: 30 }, signal);
+        if (signal.aborted) return;
+        setForecast30dData(forecast);
+      } catch (e) {
+        if ((e as { name?: string })?.name === 'AbortError') return;
+        setForecast30dData(null);
       } finally {
         if (!signal.aborted) {
           setHotspotsLoading(false);
@@ -457,6 +470,14 @@ export default function MapPage() {
             explainMeta={riskData?.meta?.explain ?? null}
             forecastTotal={riskData?.forecast?.reduce((s, f) => s + f.expected_rounded, 0)}
             horizon={riskData?.model?.horizon}
+            forecastMode={forecastMode}
+            onForecastModeChange={setForecastMode}
+            forecast30d={
+              forecast30dData?.summary
+                ? { expectedTotal: forecast30dData.summary.expected_total, horizon: forecast30dData.summary.horizon }
+                : undefined
+            }
+            dataQualityWarning={forecast30dData?.meta?.data_quality?.status === 'insufficient_data'}
           />
         </aside>
       </div>

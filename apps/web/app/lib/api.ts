@@ -114,3 +114,25 @@ export async function fetchRisk(
   if (!res.ok) throw new Error(`Risk: HTTP ${res.status}`);
   return res.json();
 }
+
+export type ForecastResponse = {
+  granularity: string;
+  model: { name: string; horizon: number };
+  history: { ts: string; count: number }[];
+  forecast: { ts: string; count: number }[];
+  summary?: { expected_total: number; horizon: number; granularity: string; scope: string };
+  meta?: Partial<ApiMeta> & { data_quality?: { status: string; reason?: string; recommendation?: string } | null };
+};
+
+export async function fetchForecast(
+  params: { bbox: string; granularity?: string; horizon?: number },
+  signal?: AbortSignal
+): Promise<ForecastResponse> {
+  const p = new URLSearchParams();
+  p.set('bbox', params.bbox);
+  p.set('granularity', params.granularity ?? 'day');
+  p.set('horizon', String(params.horizon ?? 30));
+  const res = await fetch(`${API_BASE}/predict/forecast?${p}`, { signal });
+  if (!res.ok) throw new Error(`Forecast: HTTP ${res.status}`);
+  return res.json();
+}

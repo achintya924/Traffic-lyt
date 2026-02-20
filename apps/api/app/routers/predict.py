@@ -55,6 +55,7 @@ from app.predict.regression import (
     predict_future,
     train_poisson_model,
 )
+from app.predict.data_sufficiency import check_data_sufficiency, get_recent_activity
 from app.predict.timeseries import get_counts_timeseries
 from app.predict.trends import compute_trends
 from app.queries.predict_sql import Granularity
@@ -192,7 +193,7 @@ def forecast(
         None,
         ge=1,
         le=365,
-        description="Number of future buckets to predict; default 24 for hour, 7 for day",
+        description="Number of future buckets to predict; default 24 for hour, 30 for day",
     ),
     model: str = Query(
         "ma",
@@ -211,7 +212,7 @@ def forecast(
     """
     Return history plus a simple forecast of violation counts for the current filters + bbox.
     """
-    effective_horizon = horizon if horizon is not None else (24 if granularity == "hour" else 7)
+    effective_horizon = horizon if horizon is not None else (24 if granularity == "hour" else 30)
 
     empty_time_meta = build_time_window_meta(
         data_min_ts=None,
@@ -225,12 +226,17 @@ def forecast(
     engine = get_engine()
     _no_conn_forecast_cache = {"hit": False, "key_hash": None, "ttl_seconds": FORECAST_CACHE_TTL_SECONDS}
     _no_conn_forecast_rc = {"hit": False, "key_hash": None, "ttl_seconds": FORECAST_RESPONSE_TTL}
+    def _forecast_summary(forecast_list: list, eff_horizon: int) -> dict:
+        total = sum(int(f.get("count", 0)) for f in forecast_list) if forecast_list else 0
+        return {"expected_total": total, "horizon": eff_horizon, "granularity": granularity, "scope": "viewport"}
+
     if engine is None:
         return {
             "granularity": granularity,
             "model": {"name": model, "window": window, "alpha": alpha, "horizon": effective_horizon},
             "history": [],
             "forecast": [],
+            "summary": _forecast_summary([], effective_horizon),
             "meta": {
                 "history_points": 0,
                 "forecast_points": 0,
@@ -250,6 +256,7 @@ def forecast(
                     "model": {"name": model, "window": window, "alpha": alpha, "horizon": effective_horizon},
                     "history": [],
                     "forecast": [],
+                    "summary": _forecast_summary([], effective_horizon),
                     "meta": {
                         "history_points": 0,
                         "forecast_points": 0,
@@ -293,6 +300,8 @@ def forecast(
             if resp_cached is not None:
                 request.state.response_cache_hit = True
                 out = dict(resp_cached)
+                if "summary" not in out and isinstance(out.get("forecast"), list):
+                    out["summary"] = _forecast_summary(out["forecast"], effective_horizon)
                 m = {**resp_cached.get("meta", {}), "response_cache": {"hit": True, "key_hash": short_hash(resp_key), "ttl_seconds": FORECAST_RESPONSE_TTL}}
                 m.setdefault("eval", None)
                 m.setdefault("explain", None)
@@ -309,16 +318,21 @@ def forecast(
                     short_hash(model_key),
                     elapsed_ms,
                 )
+                _data_max = get_data_time_range(conn, filters_to_use)[1]
+                _activity = get_recent_activity(conn, filters_to_use, _data_max)
+                _data_quality = check_data_sufficiency(_activity["total_events_last_90d"], _activity["nonzero_days_last_90d"])
                 payload = {
                     "granularity": granularity,
                     "model": {"name": model, "window": window, "alpha": alpha, "horizon": effective_horizon},
                     "history": cached["history"],
                     "forecast": cached["forecast"],
+                    "summary": _forecast_summary(cached["forecast"], effective_horizon),
                     "meta": {
                         "history_points": len(cached["history"]),
                         "forecast_points": len(cached["forecast"]),
                         "eval": None,
                         "explain": None,
+                        "data_quality": _data_quality,
                         "model_cache": {
                             "hit": True,
                             "key_hash": short_hash(model_key),
@@ -331,6 +345,9 @@ def forecast(
                 resp_cache.set(resp_key, payload, FORECAST_RESPONSE_TTL)
                 return payload
             history = get_counts_timeseries(conn, filters_to_use, granularity, limit_history)
+            _data_max = get_data_time_range(conn, filters_to_use)[1]
+            _activity = get_recent_activity(conn, filters_to_use, _data_max)
+            _data_quality = check_data_sufficiency(_activity["total_events_last_90d"], _activity["nonzero_days_last_90d"])
         forecast_list = forecast_counts(
             history,
             granularity,
@@ -361,11 +378,13 @@ def forecast(
         "model": {"name": model, "window": window, "alpha": alpha, "horizon": effective_horizon},
         "history": history,
         "forecast": forecast_list,
+        "summary": _forecast_summary(forecast_list, effective_horizon),
         "meta": {
             "history_points": len(history),
             "forecast_points": len(forecast_list),
             "eval": None,
             "explain": None,
+            "data_quality": _data_quality,
             "model_cache": {
                 "hit": False,
                 "key_hash": short_hash(model_key),
