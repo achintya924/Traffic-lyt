@@ -6,6 +6,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass
+from typing import Any
 
 from fastapi import HTTPException, Request
 
@@ -33,6 +34,8 @@ class RateLimiter:
         self._window_seconds = 60.0
         self._purge_after_seconds = 120.0
         self._last_purge = time.monotonic()
+        self._allowed: dict[str, int] = {}
+        self._blocked: dict[str, int] = {}
 
     def _purge_if_needed(self) -> None:
         now = time.monotonic()
@@ -62,17 +65,29 @@ class RateLimiter:
             entry = self._store.get(key)
             if entry is None:
                 self._store[key] = WindowEntry(count=1, window_start=now)
+                self._allowed[group] = self._allowed.get(group, 0) + 1
                 return True, 0
             elapsed = now - entry.window_start
             if elapsed >= self._window_seconds:
                 entry.count = 1
                 entry.window_start = now
+                self._allowed[group] = self._allowed.get(group, 0) + 1
                 return True, 0
             entry.count += 1
             if entry.count <= limit:
+                self._allowed[group] = self._allowed.get(group, 0) + 1
                 return True, 0
+            self._blocked[group] = self._blocked.get(group, 0) + 1
             retry_after = max(1, int(self._window_seconds - elapsed))
             return False, retry_after
+
+    def stats(self) -> dict[str, Any]:
+        """Return allowed/blocked counts per group (Phase 4.6)."""
+        with self._lock:
+            return {
+                "allowed": dict(self._allowed),
+                "blocked": dict(self._blocked),
+            }
 
 
 _limiter: RateLimiter | None = None
@@ -118,6 +133,8 @@ def rate_limit(group: str):
         allowed, retry_after = limiter.check(client_id, group)
         if allowed:
             return None
+        request.state.rate_limited = True
+        request.state.retry_after_seconds = retry_after
         raise HTTPException(
             status_code=429,
             detail={

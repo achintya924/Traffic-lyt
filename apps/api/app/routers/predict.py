@@ -42,7 +42,7 @@ import time
 from datetime import datetime as dt_parse
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.db import get_connection, get_engine
 from app.predict.forecast import forecast_counts
@@ -182,6 +182,7 @@ def timeseries(
 
 @router.get("/forecast", dependencies=[Depends(rate_limit("predict"))])
 def forecast(
+    request: Request,
     granularity: Granularity = Query(
         "hour",
         description="Aggregation granularity: 'hour' or 'day'",
@@ -273,6 +274,7 @@ def forecast(
             resp_cache = get_response_cache()
             resp_cached = resp_cache.get(resp_key)
             if resp_cached is not None:
+                request.state.response_cache_hit = True
                 out = dict(resp_cached)
                 out["meta"] = {**resp_cached.get("meta", {}), "response_cache": {"hit": True, "key_hash": short_hash(resp_key), "ttl_seconds": FORECAST_RESPONSE_TTL}}
                 return out
@@ -280,6 +282,7 @@ def forecast(
             t0 = time.perf_counter()
             cached = registry.get(model_key)
             if cached and isinstance(cached.get("history"), list) and isinstance(cached.get("forecast"), list):
+                request.state.model_cache_hit = True
                 elapsed_ms = round((time.perf_counter() - t0) * 1000)
                 logger.info(
                     "model_cache_hit endpoint=forecast key_hash=%s elapsed_ms=%d",
@@ -444,6 +447,7 @@ def trends(
 
 @router.get("/hotspots/grid", dependencies=[Depends(rate_limit("predict"))])
 def hotspots_grid(
+    request: Request,
     cell_m: int = Query(
         250,
         ge=50,
@@ -545,6 +549,7 @@ def hotspots_grid(
             resp_cache = get_response_cache()
             resp_cached = resp_cache.get(resp_key)
             if resp_cached is not None:
+                request.state.response_cache_hit = True
                 out = dict(resp_cached)
                 out["meta"] = {**resp_cached.get("meta", {}), "response_cache": {"hit": True, "key_hash": short_hash(resp_key), "ttl_seconds": HOTSPOTS_RESPONSE_TTL}}
                 return out
@@ -568,6 +573,7 @@ def hotspots_grid(
 
 @router.get("/risk", dependencies=[Depends(rate_limit("predict"))])
 def risk(
+    request: Request,
     granularity: Granularity = Query(
         "hour",
         description="Aggregation granularity: 'hour' or 'day'",
@@ -662,6 +668,7 @@ def risk(
         resp_cache = get_response_cache()
         resp_cached = resp_cache.get(resp_key)
         if resp_cached is not None:
+            request.state.response_cache_hit = True
             out = dict(resp_cached)
             out["meta"] = {**resp_cached.get("meta", {}), "response_cache": {"hit": True, "key_hash": short_hash(resp_key), "ttl_seconds": RISK_RESPONSE_TTL}}
             return out
@@ -671,6 +678,7 @@ def risk(
         cached = registry.get(model_key)
 
         if cached and cached.get("fitted") is not None:
+            request.state.model_cache_hit = True
             fitted = cached["fitted"]
             explain = cached.get("explain") or {"top_positive": [], "top_negative": []}
             metrics = cached.get("metrics") or {"mae": 0.0, "mape": 0.0, "test_points": 0}

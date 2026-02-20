@@ -1,4 +1,5 @@
 import os
+import time
 
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,8 +8,13 @@ from sqlalchemy import text
 from app.db import get_connection, get_engine
 from app.routers import predict, spatial_aggregations, stats, time_aggregations
 from app.utils.model_registry import get_registry
+from app.utils.rate_limiter import get_limiter
 from app.utils.response_cache import get_response_cache
 from app.utils.timing_middleware import TimingMiddleware
+
+from app.middleware.request_id import RequestIdMiddleware
+
+_start_time = time.monotonic()
 
 app = FastAPI(title="Traffic-lyt API")
 app.include_router(stats.router)
@@ -28,7 +34,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(TimingMiddleware)  # Phase 4.5: request timing + slow-request WARNING
+app.add_middleware(TimingMiddleware)  # Phase 4.5+4.6: timing + structured logging
+app.add_middleware(RequestIdMiddleware)  # Phase 4.6: X-Request-ID (outermost, runs first)
 
 
 @app.get("/health")
@@ -44,6 +51,19 @@ def internal_cache():
     return {
         "model_registry": get_registry().stats(),
         "response_cache": get_response_cache().stats(),
+    }
+
+
+@app.get("/internal/metrics")
+def internal_metrics():
+    """Phase 4.6: Lightweight metrics. Guarded by DEBUG=true."""
+    if os.getenv("DEBUG", "").lower() not in ("1", "true", "yes"):
+        return {"error": "disabled", "message": "Set DEBUG=true to enable"}
+    return {
+        "uptime_seconds": round(time.monotonic() - _start_time, 2),
+        "model_registry": get_registry().stats(),
+        "response_cache": get_response_cache().stats(),
+        "rate_limiter": get_limiter().stats(),
     }
 
 

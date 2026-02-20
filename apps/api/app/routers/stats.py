@@ -6,7 +6,7 @@ Phase 4.3: response-level cache; meta.response_cache on every 200 response.
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import text
 
 from app.db import get_connection, get_engine
@@ -37,6 +37,7 @@ _empty_meta = build_time_window_meta(
 
 @router.get("/stats", dependencies=[Depends(rate_limit("stats"))])
 def violations_stats(
+    request: Request,
     filters: ViolationFilters = Depends(get_violation_filters),
 ) -> dict[str, Any]:
     _no_conn_rc = {"hit": False, "key_hash": None, "ttl_seconds": STATS_RESPONSE_TTL}
@@ -96,6 +97,7 @@ def violations_stats(
             resp_cache = get_response_cache()
             cached = resp_cache.get(resp_key)
             if cached is not None:
+                request.state.response_cache_hit = True
                 out = dict(cached)
                 out["meta"] = {**cached.get("meta", {}), "response_cache": {"hit": True, "key_hash": short_hash(resp_key), "ttl_seconds": STATS_RESPONSE_TTL}}
                 return out
