@@ -59,3 +59,53 @@ h1 {
   font-weight: 600;
   margin-bottom: 0.25rem;
 }
+
+/* Phase 4.8 map page: scrollable, two-column layout */
+.map-page {
+  padding: 0;
+  max-width: 1400px;
+  margin: 0 auto;
+  min-height: 100vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.map-page-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  flex: 1;
+  padding: 1rem;
+}
+
+@media (min-width: 900px) {
+  .map-page-grid {
+    grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
+  }
+}
+
+.map-map-container {
+  position: relative;
+  min-height: 360px;
+  height: 60vh;
+  background: #1e293b;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.map-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+@media (min-width: 900px) {
+  .map-sidebar {
+    position: sticky;
+    top: 1rem;
+    max-height: calc(100vh - 2rem);
+  }
+}

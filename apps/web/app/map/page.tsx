@@ -2,9 +2,19 @@
 
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchHotspotsGrid, type HotspotCell } from '@/app/lib/api';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+import {
+  API_BASE,
+  fetchHotspotsGrid,
+  fetchRisk,
+  fetchStats,
+  type HotspotCell,
+  type RiskResponse,
+  type StatsResponse,
+} from '@/app/lib/api';
+import AnchorInfo from '@/app/components/AnchorInfo';
+import CachePill from '@/app/components/CachePill';
+import RiskLegend from '@/app/components/RiskLegend';
+import RiskPanel from '@/app/components/RiskPanel';
 
 type Violation = {
   id: number;
@@ -20,13 +30,6 @@ type MapBounds = { south: number; north: number; west: number; east: number };
 type ViolationsResponse = {
   violations?: Violation[];
   error?: string;
-};
-
-type StatsResponse = {
-  total?: number;
-  min_time?: string | null;
-  max_time?: string | null;
-  top_types?: { violation_type: string; count: number }[];
 };
 
 type HourBucket = { hour: number; count: number };
@@ -77,7 +80,14 @@ export default function MapPage() {
   const [hotspotsLoading, setHotspotsLoading] = useState(false);
   const [hotspotsError, setHotspotsError] = useState<string | null>(null);
   const [flyToTarget, setFlyToTarget] = useState<[number, number] | null>(null);
+  const [riskData, setRiskData] = useState<RiskResponse | null>(null);
+  const [riskLoading, setRiskLoading] = useState(false);
+  const [anchorMeta, setAnchorMeta] = useState<StatsResponse['meta'] | null>(null);
+  const [cacheHit, setCacheHit] = useState(false);
+  const [showLoadingSpinner, setShowLoadingSpinner] = useState(false);
   const boundsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadingDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const firstBoundsSetRef = useRef(false);
 
   useEffect(() => {
@@ -139,86 +149,119 @@ export default function MapPage() {
 
   useEffect(() => {
     if (viewMode !== 'heatmap' || !bounds) return;
-    let cancelled = false;
+    const ac = new AbortController();
     setHeatmapError(null);
     setHeatmapLoading(true);
     const url = `${API_BASE}/aggregations/grid?cell_m=${gridSize}&bbox=${bboxString(bounds)}`;
-    fetch(url)
+    fetch(url, { signal: ac.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
       .then((list: HeatmapPoint[]) => {
-        if (!cancelled) {
-          setHeatmapPoints(Array.isArray(list) ? list : []);
-          setHeatmapError(null);
-        }
+        setHeatmapPoints(Array.isArray(list) ? list : []);
+        setHeatmapError(null);
       })
       .catch((e) => {
-        if (!cancelled) {
-          setHeatmapError(e instanceof Error ? e.message : String(e));
-          setHeatmapPoints([]);
-        }
+        if ((e as { name?: string })?.name === 'AbortError') return;
+        setHeatmapError(e instanceof Error ? e.message : String(e));
+        setHeatmapPoints([]);
       })
-      .finally(() => {
-        if (!cancelled) setHeatmapLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+      .finally(() => setHeatmapLoading(false));
+    return () => ac.abort();
   }, [viewMode, bounds, gridSize]);
 
-  // Re-fetch viewport-aware analytics (stats + hour/day buckets + hotspots) whenever bounds change.
+  // Re-fetch viewport-aware analytics (stats + hour/day + hotspots + risk) with AbortController.
+  // Non-flickering loading: show spinner only if loading > 150ms.
   useEffect(() => {
     if (!bounds) return;
-    let cancelled = false;
-    const bbox = bboxString(bounds);
+    const ac = new AbortController();
+    abortRef.current = ac;
+    const signal = ac.signal;
+
     setHotspotsError(null);
     setHotspotsLoading(true);
+    setRiskLoading(true);
+    setShowLoadingSpinner(false);
+
+    if (loadingDelayRef.current) clearTimeout(loadingDelayRef.current);
+    loadingDelayRef.current = setTimeout(() => setShowLoadingSpinner(true), 150);
+
+    const bbox = bboxString(bounds);
+
+    let gotStatsMeta = false;
     async function fetchViewportAnalytics() {
       try {
         const [statsRes, hourRes, dayRes] = await Promise.all([
-          fetch(`${API_BASE}/violations/stats?bbox=${bbox}`),
-          fetch(`${API_BASE}/aggregations/time/hour?bbox=${bbox}`),
-          fetch(`${API_BASE}/aggregations/time/day?bbox=${bbox}`),
+          fetch(`${API_BASE}/violations/stats?bbox=${bbox}`, { signal }),
+          fetch(`${API_BASE}/aggregations/time/hour?bbox=${bbox}`, { signal }),
+          fetch(`${API_BASE}/aggregations/time/day?bbox=${bbox}`, { signal }),
         ]);
-        if (!statsRes.ok || !hourRes.ok || !dayRes.ok) {
-          return;
-        }
+        if (signal.aborted) return;
+        if (!statsRes.ok || !hourRes.ok || !dayRes.ok) return;
+
         const [statsJson, hoursJson, daysJson]: [StatsResponse, HourBucket[], DayBucket[]] =
           await Promise.all([statsRes.json(), hourRes.json(), dayRes.json()]);
-        if (cancelled) return;
-        if (typeof statsJson.total === 'number') {
-          setStatsTotal(statsJson.total);
-        }
+        if (signal.aborted) return;
+
+        setStatsTotal(typeof statsJson.total === 'number' ? statsJson.total : null);
         setHourBuckets(Array.isArray(hoursJson) ? hoursJson : []);
         setDayBuckets(Array.isArray(daysJson) ? daysJson : []);
-      } catch {
-        // Keep existing values on error; viewport insights simply won't update this time.
+        if (statsJson.meta) {
+          setAnchorMeta(statsJson.meta);
+          setCacheHit(!!statsJson.meta.response_cache?.hit);
+          gotStatsMeta = true;
+        }
+      } catch (e) {
+        if ((e as { name?: string })?.name === 'AbortError') return;
       }
+
       try {
-        const hotspots = await fetchHotspotsGrid({
-          bbox,
-          cell_m: gridSize,
-          recent_days: 7,
-          baseline_days: 30,
-          limit: 3000,
-        });
-        if (cancelled) return;
+        const hotspots = await fetchHotspotsGrid(
+          { bbox, cell_m: gridSize, recent_days: 7, baseline_days: 30, limit: 3000 },
+          signal
+        );
+        if (signal.aborted) return;
         setHotspotsCells(hotspots.cells);
         setHotspotsError(null);
-      } catch (e) {
-        if (!cancelled) {
-          setHotspotsError(e instanceof Error ? e.message : 'Hotspots unavailable');
-          setHotspotsCells([]);
+        if (!gotStatsMeta && hotspots.meta) {
+          setAnchorMeta(hotspots.meta as StatsResponse['meta']);
+          setCacheHit(!!(hotspots.meta as { response_cache?: { hit?: boolean } })?.response_cache?.hit);
         }
+      } catch (e) {
+        if ((e as { name?: string })?.name === 'AbortError') return;
+        setHotspotsError(e instanceof Error ? e.message : 'Hotspots unavailable');
+        setHotspotsCells([]);
+      }
+
+      try {
+        const risk = await fetchRisk({ bbox, granularity: 'hour', horizon: 24 }, signal);
+        if (signal.aborted) return;
+        setRiskData(risk);
+      } catch (e) {
+        if ((e as { name?: string })?.name === 'AbortError') return;
+        setRiskData(null);
       } finally {
-        if (!cancelled) setHotspotsLoading(false);
+        if (!signal.aborted) {
+          setHotspotsLoading(false);
+          setRiskLoading(false);
+          if (loadingDelayRef.current) {
+            clearTimeout(loadingDelayRef.current);
+            loadingDelayRef.current = null;
+          }
+          setShowLoadingSpinner(false);
+        }
       }
     }
     fetchViewportAnalytics();
+
     return () => {
-      cancelled = true;
+      ac.abort();
+      abortRef.current = null;
+      if (loadingDelayRef.current) {
+        clearTimeout(loadingDelayRef.current);
+        loadingDelayRef.current = null;
+      }
     };
   }, [bounds, gridSize]);
 
@@ -250,18 +293,15 @@ export default function MapPage() {
   const hour = busiestHour(hourBuckets);
   const day = busiestDay(dayBuckets);
   return (
-    <main style={{ padding: 0, height: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <main className="map-page">
       <header style={{ padding: '0.75rem 1rem', background: '#1e293b', flexShrink: 0 }}>
         <h1 style={{ fontSize: '1.25rem' }}>Violations map</h1>
         <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginTop: '0.25rem' }}>
           Total violations (this view): {statsTotal !== null ? statsTotal : '…'}
+          <CachePill hit={cacheHit} />
         </p>
         <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginTop: '0.25rem' }}>
           {violations.length} points · NYC
-        </p>
-        {/* TEMP: bounds debug for Phase 2.2-B verification */}
-        <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
-          Bounds: {bounds ? `${bounds.west.toFixed(3)},${bounds.south.toFixed(3)},${bounds.east.toFixed(3)},${bounds.north.toFixed(3)}` : 'n/a'}
         </p>
         <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>View:</span>
@@ -314,26 +354,37 @@ export default function MapPage() {
                   <option key={m} value={m}>{m}m</option>
                 ))}
               </select>
-              {heatmapLoading && <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Loading…</span>}
+              {heatmapLoading && showLoadingSpinner && <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Loading…</span>}
               {heatmapError && <span style={{ fontSize: '0.8rem', color: '#f87171' }}>{heatmapError}</span>}
             </>
           )}
         </div>
-        <div style={{ marginTop: '0.75rem', padding: '0.5rem 0', borderTop: '1px solid #334155' }}>
-          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '0.25rem' }}>
-            Insights (this view)
+        <AnchorInfo meta={anchorMeta} label="Data" />
+        <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: '#94a3b8' }}>
+          Busiest hour: {hour && hour.count > 0 ? `${String(hour.hour).padStart(2, '0')}:00 (${hour.count})` : 'No data'}
+          {' · '}
+          Busiest day: {day && day.count > 0 ? `${day.day} (${day.count})` : 'No data'}
+        </div>
+      </header>
+
+      <div className="map-page-grid">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', minWidth: 0 }}>
+          <div className="map-map-container">
+            <RiskLegend />
+            <ViolationsMap
+              violations={violations}
+              viewMode={viewMode}
+              heatmapPoints={heatmapPoints}
+              onBoundsChange={onBoundsChange}
+              flyToTarget={flyToTarget}
+              onFlyToDone={() => setFlyToTarget(null)}
+            />
           </div>
-          <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: 0 }}>
-            Busiest hour: {hour && hour.count > 0 ? `${String(hour.hour).padStart(2, '0')}:00 (${hour.count})` : 'No data'}
-          </p>
-          <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: '0.25rem 0 0 0' }}>
-            Busiest day: {day && day.count > 0 ? `${day.day} (${day.count})` : 'No data'}
-          </p>
-          <div style={{ marginTop: '0.5rem' }}>
+          <div style={{ background: '#1e293b', borderRadius: 8, padding: '0.75rem 1rem' }}>
             <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '0.25rem' }}>
               Top 5 Hotspots
             </div>
-            {hotspotsLoading && (
+            {hotspotsLoading && showLoadingSpinner && (
               <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: 0 }}>Loading…</p>
             )}
             {hotspotsError && !hotspotsLoading && (
@@ -398,16 +449,16 @@ export default function MapPage() {
             })()}
           </div>
         </div>
-      </header>
-      <div style={{ flex: 1, minHeight: 0 }}>
-        <ViolationsMap
-          violations={violations}
-          viewMode={viewMode}
-          heatmapPoints={heatmapPoints}
-          onBoundsChange={onBoundsChange}
-          flyToTarget={flyToTarget}
-          onFlyToDone={() => setFlyToTarget(null)}
-        />
+
+        <aside className="map-sidebar" style={{ background: '#1e293b', borderRadius: 8, padding: '0.75rem 1rem' }}>
+          {riskLoading && showLoadingSpinner && <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: 0 }}>Loading…</p>}
+          <RiskPanel
+            evalMeta={riskData?.meta?.eval ?? null}
+            explainMeta={riskData?.meta?.explain ?? null}
+            forecastTotal={riskData?.forecast?.reduce((s, f) => s + f.expected_rounded, 0)}
+            horizon={riskData?.model?.horizon}
+          />
+        </aside>
       </div>
     </main>
   );
