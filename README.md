@@ -210,6 +210,34 @@ docker compose -f infra/docker-compose.yml exec api pytest tests/test_zones.py -
 
 ---
 
+## Phase 5.2: Zone Analytics
+
+Zone-level analytics: violations inside a zone, aggregated by time, top types, and a simple trend.
+
+### GET /api/zones/{zone_id}/analytics
+
+Returns `total_count`, `time_series`, `top_violation_types` (top 5), and `summary` with `trend_direction` ("up" | "down" | "flat") and `percent_change`. Uses `ST_Intersects` for spatial filtering. Response cached 90s.
+
+**Query params**
+
+- `start_ts`, `end_ts` (optional) — time window (ISO)
+- `granularity` — `hour` | `day` (default `day`)
+
+**Example**
+
+```powershell
+curl "http://localhost:8000/api/zones/1/analytics"
+curl "http://localhost:8000/api/zones/1/analytics?granularity=hour"
+```
+
+**Run zone analytics tests**
+
+```powershell
+docker compose -f infra/docker-compose.yml exec api pytest tests/test_zones_analytics.py -v
+```
+
+---
+
 ## Troubleshooting
 
 ### Ports already in use (3000, 8000, 5432)
