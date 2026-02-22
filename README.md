@@ -178,6 +178,38 @@ curl -s "http://localhost:8000/violations/stats?hour_start=-1"
 
 ---
 
+## Phase 5.1: Zone system
+
+Named areas (polygon zones) for decision-support. Run `init_zones` once after the stack is up:
+
+```powershell
+docker compose -f infra/docker-compose.yml exec api python -m app.scripts.init_zones
+```
+
+### Zones API
+
+- **POST /api/zones** — Create a zone. Body: `{ "name": "Manhattan", "zone_type": "borough", "polygon": <GeoJSON Polygon> }`
+  - `polygon` must be a valid GeoJSON Polygon (type `"Polygon"`, closed ring, min 4 points, no self-intersections).
+  - Optional: `bbox`, `tags`.
+  - Returns created zone (id, name, zone_type, bbox, created_at).
+- **GET /api/zones** — List zones (pagination: `limit`, `offset`; filters: `zone_type`, `search`; `includeGeom=true` for geometry).
+- **GET /api/zones/{id}** — Get zone details including geometry.
+- **DELETE /api/zones/{id}** — Delete a zone.
+
+**Example: create zone**
+
+```powershell
+curl -X POST "http://localhost:8000/api/zones" -H "Content-Type: application/json" -d '{\"name\":\"Manhattan Box\",\"zone_type\":\"custom\",\"polygon\":{\"type\":\"Polygon\",\"coordinates\":[[[-74.02,40.70],[-73.95,40.70],[-73.95,40.80],[-74.02,40.80],[-74.02,40.70]]]}}'
+```
+
+**Run zone tests**
+
+```powershell
+docker compose -f infra/docker-compose.yml exec api pytest tests/test_zones.py -v
+```
+
+---
+
 ## Troubleshooting
 
 ### Ports already in use (3000, 8000, 5432)
