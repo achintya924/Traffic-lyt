@@ -238,6 +238,40 @@ docker compose -f infra/docker-compose.yml exec api pytest tests/test_zones_anal
 
 ---
 
+## Phase 5.3: Zone Ranking
+
+Compare zones by risk, trend, or volume. Returns top N zones sorted by chosen metric.
+
+### GET /api/zones/rankings
+
+**Query params**
+
+- `start_ts`, `end_ts` (optional) — time window (ISO)
+- `granularity` — `hour` | `day` (default `day`)
+- `limit` — max zones to return (default 10)
+- `sort_by` — `risk` | `trend` | `volume` (default `risk`)
+
+**Scoring**
+
+- **risk**: normalized(total_count) + normalized(max(0, percent_change))
+- **trend**: percent_change
+- **volume**: total_count
+
+**Example**
+
+```powershell
+curl "http://localhost:8000/api/zones/rankings"
+curl "http://localhost:8000/api/zones/rankings?sort_by=volume&limit=5"
+```
+
+**Run zone rankings tests**
+
+```powershell
+docker compose -f infra/docker-compose.yml exec api pytest tests/test_zones_rankings.py -v
+```
+
+---
+
 ## Troubleshooting
 
 ### Ports already in use (3000, 8000, 5432)
