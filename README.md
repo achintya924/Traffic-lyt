@@ -334,6 +334,41 @@ docker compose -f infra/docker-compose.yml exec api pytest tests/test_anomalies_
 
 ---
 
+## Phase 5.6: Early Warning Indicators
+
+On-demand warning cards for zones that need attention (trend up, WoW/MoM spike, anomaly cluster).
+
+### GET /api/warnings
+
+**Query params**
+
+- `scope` — `zones` (default) | `viewport` (viewport returns 422 for now)
+- `bbox` (optional, viewport only)
+- `start_ts`, `end_ts` (optional; else anchored to global MAX)
+- `limit` — max warnings (default 10)
+
+**Signals (zones scope)**
+
+- **trend_up**: zone trend_direction up, percent_change ≥ 10
+- **wow_spike**: week-over-week delta_percent ≥ 20
+- **mom_spike**: month-over-month delta_percent ≥ 30
+- **anomaly_cluster**: zone has ≥ 1 anomaly grid cell (z-score)
+
+**Example**
+
+```powershell
+curl "http://localhost:8000/api/warnings"
+curl "http://localhost:8000/api/warnings?scope=zones&limit=5"
+```
+
+**Run warnings tests**
+
+```powershell
+docker compose -f infra/docker-compose.yml exec api pytest tests/test_warnings.py -v
+```
+
+---
+
 ## Troubleshooting
 
 ### Ports already in use (3000, 8000, 5432)
