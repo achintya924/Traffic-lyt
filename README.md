@@ -304,6 +304,36 @@ docker compose -f infra/docker-compose.yml exec api pytest tests/test_zones_comp
 
 ---
 
+## Phase 5.5: Historical Anomaly Heatmap
+
+Grid-based anomaly detection: cells where violation counts spike vs baseline (z-score). Returns heatmap-ready points (lat, lon, weight).
+
+### GET /api/anomalies/heatmap
+
+**Query params**
+
+- `start_ts`, `end_ts` (optional) — time window (ISO); else anchored to global MAX
+- `granularity` — `day` | `hour` (default `day`)
+- `bbox` (optional) — minLon,minLat,maxLon,maxLat
+- `method` — `zscore` (ewm not implemented)
+- `threshold` — z-score threshold (default 3.0)
+- `top_n` — max points (default 500)
+
+**Example**
+
+```powershell
+curl "http://localhost:8000/api/anomalies/heatmap"
+curl "http://localhost:8000/api/anomalies/heatmap?bbox=-74.1,40.6,-73.9,40.8&top_n=100"
+```
+
+**Run anomaly heatmap tests**
+
+```powershell
+docker compose -f infra/docker-compose.yml exec api pytest tests/test_anomalies_heatmap.py -v
+```
+
+---
+
 ## Troubleshooting
 
 ### Ports already in use (3000, 8000, 5432)
