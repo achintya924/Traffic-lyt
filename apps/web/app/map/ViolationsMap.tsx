@@ -78,6 +78,29 @@ function FlyToTarget({
   return null;
 }
 
+function FitBounds({
+  bounds,
+  onDone,
+}: {
+  bounds: MapBounds | null;
+  onDone: () => void;
+}) {
+  const map = useMap();
+  useEffect(() => {
+    if (!bounds) return;
+    const { south, north, west, east } = bounds;
+    map.fitBounds(
+      [
+        [south, west],
+        [north, east],
+      ],
+      { maxZoom: 14, duration: 0.5 }
+    );
+    onDone();
+  }, [map, bounds, onDone]);
+  return null;
+}
+
 function HeatmapLayer({ points }: { points: HeatmapPoint[] }) {
   const map = useMap();
   const layerRef = useRef<{ setLatLngs: (latlngs: [number, number, number][]) => void } | null>(null);
@@ -109,6 +132,8 @@ type ViolationsMapProps = {
   onBoundsChange: (b: MapBounds) => void;
   flyToTarget?: [number, number] | null;
   onFlyToDone?: () => void;
+  fitBounds?: MapBounds | null;
+  onFitBoundsDone?: () => void;
 };
 
 export default function ViolationsMap({
@@ -118,6 +143,8 @@ export default function ViolationsMap({
   onBoundsChange,
   flyToTarget = null,
   onFlyToDone = () => {},
+  fitBounds = null,
+  onFitBoundsDone = () => {},
 }: ViolationsMapProps) {
   return (
     <MapContainer
@@ -132,6 +159,7 @@ export default function ViolationsMap({
       />
       <BoundsReporter onBoundsChange={onBoundsChange} />
       <FlyToTarget target={flyToTarget ?? null} onDone={onFlyToDone} />
+      <FitBounds bounds={fitBounds} onDone={onFitBoundsDone} />
       {viewMode === 'heatmap' && <HeatmapLayer points={heatmapPoints} />}
       {viewMode === 'markers' &&
         violations.map((v) => (

@@ -369,6 +369,14 @@ docker compose -f infra/docker-compose.yml exec api pytest tests/test_warnings.p
 
 ---
 
+## Phase 5.7: Multi-zone compare panel (UI)
+
+The map page includes a **Compare zones** panel in the sidebar. You can select up to 5 zones (from `GET /api/zones`), view side-by-side analytics (total count, trend, WoW/MoM deltas), and click a zone card to zoom the map to that zone’s bbox. Selected zone IDs are persisted in the URL as `?zones=1,8,12` for sharing and refresh.
+
+**Viewport fetch behavior:** Map-triggered fetches (stats, hotspots, risk, forecast) use a 500ms debounce on bounds change; only `moveend`/`zoomend` events trigger bounds updates, and identical bbox updates are ignored. `AbortController` cancels stale requests when the viewport changes. Hotspots use a frontend micro-cache (3s TTL) and in-flight deduplication to reduce redundant requests. On HTTP 429, the Top 5 Hotspots card keeps the last successful data, shows a subtle "Temporarily rate-limited… retrying" note, and retries with exponential backoff (600/1200/2400ms + jitter, max 3 attempts). Dev logging: `localStorage.TRAFFICLYT_DEBUG_RATE=1`.
+
+---
+
 ## Troubleshooting
 
 ### Ports already in use (3000, 8000, 5432)
