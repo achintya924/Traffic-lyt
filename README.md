@@ -377,6 +377,79 @@ The map page includes a **Compare zones** panel in the sidebar. You can select u
 
 ---
 
+## Phase 5.8: Patrol allocation recommendations
+
+Given N patrol units and a shift window, the API recommends which zones should get coverage and why.
+
+### POST /api/patrol/allocate
+
+**Request body**
+
+```json
+{
+  "units": 3,
+  "period": "current",
+  "shift_hours": 6,
+  "end_ts": null,
+  "strategy": "balanced",
+  "exclude_zone_ids": []
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| units | int | Number of patrol units (1..50), required |
+| period | string | `wow` \| `mom` \| `current` (default `current`) |
+| shift_hours | int | Shift window length in hours (default 6) |
+| end_ts | string | Optional; if missing, anchor to `MAX(occurred_at)` |
+| strategy | string | `balanced` \| `risk_max` \| `trend_focus` (default `balanced`) |
+| exclude_zone_ids | int[] | Optional zones to exclude from the plan |
+
+**Response**
+
+```json
+{
+  "plan": [
+    {
+      "zone": { "id": 1, "name": "Manhattan", "zone_type": "borough" },
+      "assigned_units": 1,
+      "priority_score": 0.83,
+      "reasons": [
+        { "signal": "high_volume", "value": 68 },
+        { "signal": "wow_spike", "value": 35.0 },
+        { "signal": "warning_high", "value": true }
+      ],
+      "recommendation_hint": "Investigate cause of spike; consider temporary coverage."
+    }
+  ],
+  "meta": { "request_id": null, "anchor_ts": "...", "response_cache": "miss" }
+}
+```
+
+**Behavior**
+
+- Uses zone rankings, analytics, WoW/MoM compare, and anomaly/warning signals (no HTTP calls; direct SQL).
+- Priority score depends on strategy:
+  - **risk_max**: normalized volume + anomaly presence + warning severity
+  - **trend_focus**: percent_change + WoW/MoM deltas
+  - **balanced**: volume + trend + anomaly + severity (weighted)
+- Allocation: assign 1 unit per zone in priority order until units exhausted; then add extra units to top zones (cap 2 per zone, 3 for risk_max).
+- Cached 75 seconds by (units, period, shift_hours, end_ts, strategy, exclude list, anchor_ts).
+
+**Example**
+
+```powershell
+curl -X POST "http://localhost:8000/api/patrol/allocate" -H "Content-Type: application/json" -d "{\"units\": 5, \"strategy\": \"risk_max\"}"
+```
+
+**Run patrol allocate tests**
+
+```powershell
+docker compose -f infra/docker-compose.yml exec api pytest tests/test_patrol_allocate.py -v
+```
+
+---
+
 ## Troubleshooting
 
 ### Ports already in use (3000, 8000, 5432)
