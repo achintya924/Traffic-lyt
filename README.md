@@ -272,6 +272,38 @@ docker compose -f infra/docker-compose.yml exec api pytest tests/test_zones_rank
 
 ---
 
+## Phase 5.4: Zone Comparison (WoW/MoM)
+
+Week-over-Week and Month-over-Month comparison for zones. Current vs previous period.
+
+### GET /api/zones/{zone_id}/compare
+
+**Query params**
+
+- `period` (required) — `wow` | `mom` (WoW = 7 days, MoM = 30 days)
+- `granularity` — `day` | `hour` (default `day`)
+- `start_ts`, `end_ts` (optional) — current window override; previous is same length immediately before
+
+**Response**
+
+- `current` / `previous`: window, total_count, time_series, top_violation_types
+- `delta`: delta_count, delta_percent, trend_label (up|down|flat), violation_type_shifts
+
+**Example**
+
+```powershell
+curl "http://localhost:8000/api/zones/1/compare?period=wow"
+curl "http://localhost:8000/api/zones/1/compare?period=mom&granularity=hour"
+```
+
+**Run zone compare tests**
+
+```powershell
+docker compose -f infra/docker-compose.yml exec api pytest tests/test_zones_compare.py -v
+```
+
+---
+
 ## Troubleshooting
 
 ### Ports already in use (3000, 8000, 5432)

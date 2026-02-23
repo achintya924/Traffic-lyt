@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.db import get_connection, get_engine
-from app.routers import predict, spatial_aggregations, stats, time_aggregations, zones, zones_analytics, zones_rankings
+from app.routers import predict, spatial_aggregations, stats, time_aggregations, zones, zones_analytics, zones_compare, zones_rankings
 from app.utils.model_registry import get_registry
 from app.utils.rate_limiter import get_limiter
 from app.utils.response_cache import get_response_cache
@@ -24,6 +24,7 @@ app.include_router(predict.router)
 app.include_router(zones_rankings.router)
 app.include_router(zones.router)
 app.include_router(zones_analytics.router)
+app.include_router(zones_compare.router)
 
 _cors_origins_raw = os.getenv(
     "CORS_ORIGINS",
