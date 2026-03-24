@@ -20,8 +20,11 @@ from app.models.policy_simulation import (
     ZoneDelta,
     ZoneTotal,
 )
+from app.utils.response_cache import get_response_cache
+from app.utils.policy_normalization import normalize_policy_request, policy_cache_key
 
 router = APIRouter(prefix="/api/policy", tags=["policy"])
+POLICY_SIMULATION_TTL = 75
 
 
 def _deterministic_baseline_total(zone_id: str) -> float:
@@ -45,16 +48,30 @@ def simulate_policy(request: Request, body: PolicySimulationRequest) -> PolicySi
     # Normalize to UTC ISO string (Z suffix)
     iso = anchor_dt.isoformat()
     anchor_ts_str = iso + "Z" if "Z" not in iso and "+" not in iso else iso.replace("+00:00", "Z")
-
+    normalized = normalize_policy_request(body)
+    normalized["anchor_ts"] = anchor_ts_str
+    cache_key = policy_cache_key(normalized)
+    resp_cache = get_response_cache()
+    cached = resp_cache.get(cache_key)
     request_id = getattr(request.state, "request_id", None) or uuid.uuid4().hex
 
-    baseline_zones = [ZoneTotal(zone_id=z, total=_deterministic_baseline_total(z)) for z in body.zones]
+    if cached is not None:
+        out = dict(cached)
+        out["meta"] = {
+            **cached.get("meta", {}),
+            "request_id": request_id,
+            "response_cache": {"status": "hit", "key": cache_key},
+        }
+        return PolicySimulationResponse.model_validate(out)
+
+    zones = normalized["zones"]
+    baseline_zones = [ZoneTotal(zone_id=z, total=_deterministic_baseline_total(z)) for z in zones]
     overall_total = sum(zt.total for zt in baseline_zones)
 
     baseline = BaselineSimulatedBlock(horizon=body.horizon, zones=baseline_zones, overall_total=overall_total)
     simulated = BaselineSimulatedBlock(horizon=body.horizon, zones=baseline_zones, overall_total=overall_total)
 
-    delta_zones = [ZoneDelta(zone_id=z, delta=0.0, delta_pct=None) for z in body.zones]
+    delta_zones = [ZoneDelta(zone_id=z, delta=0.0, delta_pct=None) for z in zones]
     delta = DeltaBlock(zones=delta_zones, overall_delta=0.0, overall_delta_pct=None)
 
     explain: list[ExplainEntry] = [
@@ -73,13 +90,15 @@ def simulate_policy(request: Request, body: PolicySimulationRequest) -> PolicySi
     meta = PolicySimulationMeta(
         request_id=request_id,
         anchor_ts=anchor_ts_str,
-        response_cache=ResponseCacheMeta(status="miss", key=None),
+        response_cache=ResponseCacheMeta(status="miss", key=cache_key),
     )
-
-    return PolicySimulationResponse(
+    response = PolicySimulationResponse(
         meta=meta,
         baseline=baseline,
         simulated=simulated,
         delta=delta,
         explain=explain,
     )
+    # Store full response; request_id is overwritten on cache hit return path.
+    resp_cache.set(cache_key, response.model_dump(), POLICY_SIMULATION_TTL)
+    return response

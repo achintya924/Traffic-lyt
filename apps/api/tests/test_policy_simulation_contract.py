@@ -30,7 +30,7 @@ def test_simulate_happy_path():
 
     assert data["meta"]["anchor_ts"] == FIXED_ANCHOR
     assert data["meta"]["response_cache"]["status"] == "miss"
-    assert data["meta"]["response_cache"]["key"] is None
+    assert isinstance(data["meta"]["response_cache"]["key"], str)
 
     assert data["simulated"]["zones"] == data["baseline"]["zones"]
     assert data["simulated"]["overall_total"] == data["baseline"]["overall_total"]
@@ -144,10 +144,14 @@ def test_simulate_determinism():
     d1 = r1.json()
     d2 = r2.json()
 
-    # Exclude request_id for comparison
+    # Exclude request_id/response_cache for comparison (cache status may differ across calls)
     def without_request_id(d):
         out = dict(d)
-        out["meta"] = {k: v for k, v in out["meta"].items() if k != "request_id"}
+        out["meta"] = {
+            k: v
+            for k, v in out["meta"].items()
+            if k not in ("request_id", "response_cache")
+        }
         return out
 
     b1 = without_request_id(d1)
