@@ -1,6 +1,10 @@
 """
 Phase 5.9A: Policy simulation contract and validation tests.
 """
+import subprocess
+import sys
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -9,12 +13,54 @@ from app.main import app
 client = TestClient(app)
 
 FIXED_ANCHOR = "2024-01-15T12:00:00Z"
+VALID_POLYGON = {
+    "type": "Polygon",
+    "coordinates": [
+        [[-74.02, 40.70], [-73.95, 40.70], [-73.95, 40.80], [-74.02, 40.80], [-74.02, 40.70]]
+    ],
+}
 
 
-def test_simulate_happy_path():
+@pytest.fixture(scope="module")
+def require_db():
+    r = client.get("/db-check")
+    if r.status_code != 200 or r.json().get("db") != "ok":
+        pytest.skip("Database unavailable")
+    yield
+
+
+@pytest.fixture(scope="module")
+def ensure_zones_table(require_db):
+    result = subprocess.run(
+        [sys.executable, "-m", "app.scripts.init_zones"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"init_zones failed: {result.stderr}")
+    yield
+
+
+@pytest.fixture
+def policy_zones(ensure_zones_table):
+    suffix = uuid.uuid4().hex[:8]
+    z1 = client.post(
+        "/api/zones",
+        json={"name": f"Policy Zone A {suffix}", "zone_type": "custom", "polygon": VALID_POLYGON},
+    )
+    z2 = client.post(
+        "/api/zones",
+        json={"name": f"Policy Zone B {suffix}", "zone_type": "custom", "polygon": VALID_POLYGON},
+    )
+    if z1.status_code not in (200, 201) or z2.status_code not in (200, 201):
+        pytest.skip("Could not create policy test zones")
+    return [str(z1.json()["id"]), str(z2.json()["id"])]
+
+
+def test_simulate_happy_path(policy_zones):
     """POST /api/policy/simulate with valid body returns 200 and contract shape."""
     payload = {
-        "zones": ["zone_a"],
+        "zones": [policy_zones[0]],
         "horizon": "24h",
         "anchor_ts": FIXED_ANCHOR,
         "interventions": [{"type": "enforcement_intensity", "pct": 20}],
@@ -32,6 +78,8 @@ def test_simulate_happy_path():
     assert data["meta"]["response_cache"]["status"] == "miss"
     assert isinstance(data["meta"]["response_cache"]["key"], str)
 
+    assert isinstance(data["baseline"]["overall_total"], float)
+    assert data["baseline"]["overall_total"] > 0
     assert data["simulated"]["zones"] == data["baseline"]["zones"]
     assert data["simulated"]["overall_total"] == data["baseline"]["overall_total"]
     assert data["delta"]["overall_delta"] == 0
@@ -129,10 +177,10 @@ def test_simulate_peak_hour_reduction_over_90_422():
     assert r.status_code == 422
 
 
-def test_simulate_determinism():
+def test_simulate_determinism(policy_zones):
     """Same payload (including anchor_ts) yields same baseline per zone; compare excluding request_id."""
     payload = {
-        "zones": ["zone_x", "zone_y"],
+        "zones": [policy_zones[0], policy_zones[1]],
         "horizon": "30d",
         "anchor_ts": FIXED_ANCHOR,
         "interventions": [{"type": "enforcement_intensity", "pct": 50}],
@@ -161,3 +209,22 @@ def test_simulate_determinism():
     assert d1["simulated"] == d2["simulated"]
     assert d1["delta"] == d2["delta"]
     assert d1["explain"] == d2["explain"]
+
+
+def test_simulate_horizon_changes_totals(policy_zones):
+    payload_24h = {
+        "zones": [policy_zones[0]],
+        "horizon": "24h",
+        "anchor_ts": FIXED_ANCHOR,
+        "interventions": [{"type": "enforcement_intensity", "pct": 20}],
+    }
+    payload_30d = {
+        "zones": [policy_zones[0]],
+        "horizon": "30d",
+        "anchor_ts": FIXED_ANCHOR,
+        "interventions": [{"type": "enforcement_intensity", "pct": 20}],
+    }
+    r1 = client.post("/api/policy/simulate", json=payload_24h)
+    r2 = client.post("/api/policy/simulate", json=payload_30d)
+    assert r1.status_code == 200 and r2.status_code == 200
+    assert r1.json()["baseline"]["overall_total"] != r2.json()["baseline"]["overall_total"]

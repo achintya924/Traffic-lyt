@@ -2,17 +2,16 @@
 Phase 5.9A: Policy impact simulation — endpoint skeleton.
 POST /api/policy/simulate returns placeholder results (no engine yet).
 """
-import hashlib
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
+from app.db import get_connection, get_engine
 from app.models.policy_simulation import (
     BaselineSimulatedBlock,
     DeltaBlock,
     ExplainEntry,
-    PolicyHorizon,
     PolicySimulationRequest,
     PolicySimulationResponse,
     PolicySimulationMeta,
@@ -20,19 +19,12 @@ from app.models.policy_simulation import (
     ZoneDelta,
     ZoneTotal,
 )
+from app.policy.baseline import get_multi_zone_baseline
 from app.utils.response_cache import get_response_cache
 from app.utils.policy_normalization import normalize_policy_request, policy_cache_key
 
 router = APIRouter(prefix="/api/policy", tags=["policy"])
 POLICY_SIMULATION_TTL = 75
-
-
-def _deterministic_baseline_total(zone_id: str) -> float:
-    """Stable deterministic placeholder from zone_id (no DB). Scale to plausible float."""
-    h = hashlib.sha256(zone_id.encode()).hexdigest()
-    # first 8 hex chars -> int in [0, 2^32) -> scale to [10, 500)
-    n = int(h[:8], 16)
-    return 10.0 + (n % 490)
 
 
 @router.post("/simulate")
@@ -64,14 +56,26 @@ def simulate_policy(request: Request, body: PolicySimulationRequest) -> PolicySi
         }
         return PolicySimulationResponse.model_validate(out)
 
-    zones = normalized["zones"]
-    baseline_zones = [ZoneTotal(zone_id=z, total=_deterministic_baseline_total(z)) for z in zones]
-    overall_total = sum(zt.total for zt in baseline_zones)
+    engine = get_engine()
+    if engine is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    with get_connection() as conn:
+        if conn is None:
+            raise HTTPException(status_code=503, detail="Database connection failed")
+        baseline_data = get_multi_zone_baseline(
+            conn=conn,
+            zones=normalized["zones"],
+            horizon=body.horizon,
+            anchor_ts=anchor_dt.replace(tzinfo=None) if anchor_dt.tzinfo is not None else anchor_dt,
+        )
+
+    baseline_zones = [ZoneTotal(zone_id=z["zone_id"], total=float(z["total"])) for z in baseline_data["zones"]]
+    overall_total = float(baseline_data["overall_total"])
 
     baseline = BaselineSimulatedBlock(horizon=body.horizon, zones=baseline_zones, overall_total=overall_total)
     simulated = BaselineSimulatedBlock(horizon=body.horizon, zones=baseline_zones, overall_total=overall_total)
 
-    delta_zones = [ZoneDelta(zone_id=z, delta=0.0, delta_pct=None) for z in zones]
+    delta_zones = [ZoneDelta(zone_id=z, delta=0.0, delta_pct=None) for z in normalized["zones"]]
     delta = DeltaBlock(zones=delta_zones, overall_delta=0.0, overall_delta_pct=None)
 
     explain: list[ExplainEntry] = [
