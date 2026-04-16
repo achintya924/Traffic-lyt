@@ -1,5 +1,6 @@
 """
 Phase 5.9D: Policy simulation engine.
+Phase 5.10: Forecast confidence threaded through baseline & simulated blocks.
 Applies deterministic intervention multipliers to a forecast baseline.
 Pure functions — no DB, no I/O, no side effects.
 """
@@ -9,6 +10,8 @@ from typing import Any
 
 from app.models.policy_simulation import (
     BaselineSimulatedBlock,
+    ConfidenceBlock,
+    ConfidenceDetails,
     DeltaBlock,
     EnforcementIntensityIntervention,
     ExplainEntry,
@@ -127,6 +130,18 @@ def _combined_multiplier(
     return round(combined, 6), entries
 
 
+def _build_confidence_block(overall_confidence: dict[str, Any] | None) -> ConfidenceBlock | None:
+    if not overall_confidence:
+        return None
+    details_dict = overall_confidence.get("details") or {}
+    details_model = ConfidenceDetails(**details_dict) if details_dict else None
+    return ConfidenceBlock(
+        score=float(overall_confidence.get("confidence_score", 0.0)),
+        label=overall_confidence.get("confidence_label", "low"),
+        details=details_model,
+    )
+
+
 def apply_simulation(
     baseline_data: dict[str, Any],
     interventions: list[Intervention],
@@ -135,21 +150,39 @@ def apply_simulation(
     multiplier, intervention_explains = _combined_multiplier(interventions)
 
     baseline_zones = [
-        ZoneTotal(zone_id=z["zone_id"], total=float(z["total"]))
+        ZoneTotal(
+            zone_id=z["zone_id"],
+            total=float(z["total"]),
+            confidence_score=z.get("confidence_score"),
+            confidence_label=z.get("confidence_label"),
+        )
         for z in baseline_data["zones"]
     ]
     baseline_overall = float(baseline_data["overall_total"])
+    confidence_block = _build_confidence_block(baseline_data.get("overall_confidence"))
+
     baseline_block = BaselineSimulatedBlock(
-        horizon=horizon, zones=baseline_zones, overall_total=baseline_overall
+        horizon=horizon,
+        zones=baseline_zones,
+        overall_total=baseline_overall,
+        confidence=confidence_block,
     )
 
     simulated_zone_list = [
-        ZoneTotal(zone_id=z.zone_id, total=round(z.total * multiplier, 4))
+        ZoneTotal(
+            zone_id=z.zone_id,
+            total=round(z.total * multiplier, 4),
+            confidence_score=z.confidence_score,
+            confidence_label=z.confidence_label,
+        )
         for z in baseline_zones
     ]
     simulated_overall = round(baseline_overall * multiplier, 4)
     simulated_block = BaselineSimulatedBlock(
-        horizon=horizon, zones=simulated_zone_list, overall_total=simulated_overall
+        horizon=horizon,
+        zones=simulated_zone_list,
+        overall_total=simulated_overall,
+        confidence=confidence_block,
     )
 
     baseline_map = {z.zone_id: z.total for z in baseline_zones}
@@ -169,6 +202,14 @@ def apply_simulation(
     )
 
     direction_word = "decrease" if overall_delta < 0 else ("increase" if overall_delta > 0 else "no change in")
+    conf_score = confidence_block.score if confidence_block else None
+    conf_label = confidence_block.label if confidence_block else None
+    conf_suffix = (
+        f" Forecast confidence: {conf_label} ({conf_score:.2f})."
+        if conf_score is not None and conf_label is not None
+        else ""
+    )
+
     summary_entry = ExplainEntry(
         code="simulation_summary",
         message=(
@@ -176,6 +217,7 @@ def apply_simulation(
             f"combined multiplier {multiplier:.4f} → "
             f"{direction_word} of {abs(overall_delta):.1f} violations "
             f"({abs(overall_delta_pct or 0):.1f}%) over the {horizon} horizon."
+            f"{conf_suffix}"
         ),
         details={
             "combined_multiplier": multiplier,
@@ -184,6 +226,8 @@ def apply_simulation(
             "overall_simulated": simulated_overall,
             "overall_delta": overall_delta,
             "overall_delta_pct": overall_delta_pct,
+            "confidence_score": conf_score,
+            "confidence_label": conf_label,
         },
     )
 

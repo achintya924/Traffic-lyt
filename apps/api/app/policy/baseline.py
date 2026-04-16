@@ -1,5 +1,6 @@
 """
 Phase 5.9C: Forecast-based policy baseline helpers.
+Phase 5.10: Per-zone and overall forecast confidence scoring.
 """
 from datetime import date, datetime
 from typing import Any
@@ -7,6 +8,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
+from app.policy.confidence import aggregate_zone_confidences, score_history
 from app.predict.forecast import forecast_counts
 
 
@@ -56,7 +58,15 @@ def get_zone_baseline(conn: Connection, zone_id: str, horizon: str, anchor_ts: d
         alpha=0.3,
     )
     total = float(sum(int(p.get("count", 0)) for p in forecast))
-    return {"zone_id": zone_id, "total": total}
+
+    confidence = score_history(history)
+    return {
+        "zone_id": zone_id,
+        "total": total,
+        "confidence_score": confidence["confidence_score"],
+        "confidence_label": confidence["confidence_label"],
+        "confidence_details": confidence["details"],
+    }
 
 
 def get_multi_zone_baseline(
@@ -64,4 +74,18 @@ def get_multi_zone_baseline(
 ) -> dict[str, Any]:
     zone_totals = [get_zone_baseline(conn, z, horizon, anchor_ts) for z in zones]
     overall_total = float(sum(float(z["total"]) for z in zone_totals))
-    return {"zones": zone_totals, "overall_total": overall_total}
+    overall_confidence = aggregate_zone_confidences(
+        [
+            {
+                "zone_id": z["zone_id"],
+                "confidence_score": z["confidence_score"],
+                "confidence_label": z["confidence_label"],
+            }
+            for z in zone_totals
+        ]
+    )
+    return {
+        "zones": zone_totals,
+        "overall_total": overall_total,
+        "overall_confidence": overall_confidence,
+    }

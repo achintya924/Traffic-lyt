@@ -74,9 +74,32 @@ class PolicySimulationMeta(BaseModel):
     response_cache: ResponseCacheMeta
 
 
+class ConfidenceDetails(BaseModel):
+    # Per-zone factor details
+    point_count: int | None = None
+    volume_score: float | None = None
+    volatility_score: float | None = None
+    coefficient_of_variation: float | None = None
+    zero_ratio: float | None = None
+    zero_ratio_score: float | None = None
+    weights: dict[str, float] | None = None
+    # Overall aggregation details
+    rule: str | None = None
+    weakest_zone_id: str | None = None
+    zone_count: int | None = None
+
+
+class ConfidenceBlock(BaseModel):
+    score: float
+    label: Literal["low", "medium", "high"]
+    details: ConfidenceDetails | None = None
+
+
 class ZoneTotal(BaseModel):
     zone_id: str
     total: float
+    confidence_score: float | None = None
+    confidence_label: Literal["low", "medium", "high"] | None = None
 
 
 class ZoneDelta(BaseModel):
@@ -95,6 +118,7 @@ class BaselineSimulatedBlock(BaseModel):
     horizon: PolicyHorizon
     zones: list[ZoneTotal]
     overall_total: float
+    confidence: ConfidenceBlock | None = None
 
 
 class DeltaBlock(BaseModel):
