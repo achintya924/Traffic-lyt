@@ -25,8 +25,13 @@ const STRATEGIES: { value: PatrolStrategy; label: string; hint: string }[] = [
 
 function zoneCenter(z: ZoneSummary): { lat: number; lon: number } | null {
   const b = z.bbox;
-  if (!b || typeof b.minx !== 'number' || typeof b.miny !== 'number'
-      || typeof b.maxx !== 'number' || typeof b.maxy !== 'number') {
+  if (
+    !b ||
+    typeof b.minx !== 'number' ||
+    typeof b.miny !== 'number' ||
+    typeof b.maxx !== 'number' ||
+    typeof b.maxy !== 'number'
+  ) {
     return null;
   }
   return { lat: (b.miny + b.maxy) / 2, lon: (b.minx + b.maxx) / 2 };
@@ -34,29 +39,38 @@ function zoneCenter(z: ZoneSummary): { lat: number; lon: number } | null {
 
 function reasonLabel(signal: string, value: number | boolean | string): string {
   switch (signal) {
-    case 'high_volume':
-      return `High volume (${value})`;
-    case 'trend_up':
-      return `Trend up (+${value}%)`;
-    case 'wow_spike':
-      return `WoW spike (+${value}%)`;
-    case 'mom_spike':
-      return `MoM spike (+${value}%)`;
-    case 'anomaly_cluster':
-      return `Anomaly cluster (${value})`;
-    case 'warning_high':
-      return 'High-severity warning';
-    case 'volume':
-      return `Volume baseline (${value})`;
-    default:
-      return `${signal}: ${value}`;
+    case 'high_volume': return `High volume (${value})`;
+    case 'trend_up': return `Trend up (+${value}%)`;
+    case 'wow_spike': return `WoW spike (+${value}%)`;
+    case 'mom_spike': return `MoM spike (+${value}%)`;
+    case 'anomaly_cluster': return `Anomaly cluster (${value})`;
+    case 'warning_high': return 'High-severity warning';
+    case 'volume': return `Volume baseline (${value})`;
+    default: return `${signal}: ${value}`;
   }
+}
+
+function SkeletonRows({ count = 5 }: { count?: number }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="skel-row">
+          <div className="skel-line" style={{ width: '1.5rem', flexShrink: 0 }} />
+          <div className="skel-block">
+            <div className="skel-line" style={{ width: `${55 + (i % 3) * 12}%` }} />
+            <div className="skel-line" style={{ width: `${28 + (i % 4) * 8}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function PatrolPage() {
   const [zones, setZones] = useState<ZoneSummary[]>([]);
   const [zonesLoading, setZonesLoading] = useState(true);
   const [zonesError, setZonesError] = useState<string | null>(null);
+  const [zonesKey, setZonesKey] = useState(0);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [units, setUnits] = useState<number>(10);
   const [strategy, setStrategy] = useState<PatrolStrategy>('balanced');
@@ -76,7 +90,7 @@ export default function PatrolPage() {
       })
       .finally(() => setZonesLoading(false));
     return () => ac.abort();
-  }, []);
+  }, [zonesKey]);
 
   const zonesById = useMemo(() => {
     const m = new Map<number, ZoneSummary>();
@@ -101,13 +115,7 @@ export default function PatrolPage() {
           ? zones.map((z) => z.id).filter((id) => !selectedIds.includes(id))
           : [];
       const res = await fetchPatrolAllocate(
-        {
-          units,
-          strategy,
-          period: 'current',
-          shift_hours: 6,
-          exclude_zone_ids: excludeIds,
-        },
+        { units, strategy, period: 'current', shift_hours: 6, exclude_zone_ids: excludeIds },
         ac.signal
       );
       setResult(res);
@@ -197,30 +205,55 @@ export default function PatrolPage() {
               </p>
             </div>
 
-            <ZoneMultiSelect
-              selectedIds={selectedIds}
-              onChange={setSelectedIds}
-              max={10}
-              label="Zones to consider (optional)"
-            />
-            <p className="panel-muted">
-              {selectedIds.length === 0
-                ? 'Leave empty to consider all zones.'
-                : `Only the ${selectedIds.length} selected zone${selectedIds.length === 1 ? '' : 's'} will be considered; others will be excluded.`}
-            </p>
+            {zonesLoading ? (
+              <SkeletonRows count={4} />
+            ) : (
+              <>
+                <ZoneMultiSelect
+                  selectedIds={selectedIds}
+                  onChange={setSelectedIds}
+                  max={10}
+                  label="Zones to consider (optional)"
+                />
+                <p className="panel-muted">
+                  {selectedIds.length === 0
+                    ? 'Leave empty to consider all zones.'
+                    : `Only the ${selectedIds.length} selected zone${selectedIds.length === 1 ? '' : 's'} will be considered; others will be excluded.`}
+                </p>
+              </>
+            )}
 
             <button
               type="submit"
               disabled={submitting || zonesLoading}
               className="panel-btn panel-btn-primary"
             >
-              {submitting ? 'Allocating…' : 'Allocate patrols'}
+              {submitting ? (
+                <><span className="btn-spinner" aria-hidden="true" />Allocating…</>
+              ) : (
+                'Allocate patrols'
+              )}
             </button>
-            {zonesError && <p className="panel-error">{zonesError}</p>}
+
+            {zonesError && (
+              <div className="error-card">
+                <div className="error-card-title">Failed to load zones</div>
+                <p className="error-card-message">{zonesError}</p>
+                <div className="error-card-footer">
+                  <button
+                    type="button"
+                    className="panel-btn"
+                    onClick={() => setZonesKey((k) => k + 1)}
+                  >
+                    Retry
+                  </button>
+                </div>
+              </div>
+            )}
             {error && (
-              <div className="status err">
-                <div className="label">Error</div>
-                <p>{error}</p>
+              <div className="error-card">
+                <div className="error-card-title">Allocation failed</div>
+                <p className="error-card-message">{error}</p>
               </div>
             )}
           </form>
@@ -232,13 +265,25 @@ export default function PatrolPage() {
             {result && <CachePill hit={cacheHit} />}
           </div>
           {!result && !submitting && (
-            <p className="panel-muted">Submit the form to see an allocation plan.</p>
+            <div className="empty-state">
+              <p className="empty-state-title">No plan yet</p>
+              <p className="empty-state-body">
+                Submit the form to compute a patrol allocation plan.
+              </p>
+            </div>
           )}
-          {submitting && <p className="panel-muted">Computing allocation…</p>}
+          {submitting && (
+            <div className="empty-state">
+              <p className="empty-state-title">Computing allocation…</p>
+            </div>
+          )}
           {result && result.plan.length === 0 && (
-            <p className="panel-muted">
-              No zones matched. Try a different selection or strategy.
-            </p>
+            <div className="empty-state">
+              <p className="empty-state-title">No zones matched</p>
+              <p className="empty-state-body">
+                Try a different zone selection or strategy.
+              </p>
+            </div>
           )}
           {result && result.plan.length > 0 && (
             <>

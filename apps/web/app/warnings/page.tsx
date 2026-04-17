@@ -51,13 +51,33 @@ function explainFor(
     const d = e.details ?? {};
     const zid = (d as { zone_id?: number }).zone_id;
     const wtype = (d as { warning_type?: string }).warning_type;
-    return (zid == null || zid === warning.zone.id) &&
-      (wtype == null || wtype === warning.warning_type);
+    return (
+      (zid == null || zid === warning.zone.id) &&
+      (wtype == null || wtype === warning.warning_type)
+    );
   });
   return match?.message ?? null;
 }
 
 type LoadState = 'initial' | 'loading' | 'ready' | 'error';
+
+function SkeletonGrid() {
+  return (
+    <div className="warnings-grid" style={{ marginTop: '0.75rem' }}>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="warning-card">
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.1rem' }}>
+            <div className="skel-line" style={{ width: '5rem' }} />
+            <div className="skel-line" style={{ width: '2.5rem' }} />
+          </div>
+          <div className="skel-line" style={{ width: '55%' }} />
+          <div className="skel-line" style={{ width: '85%' }} />
+          <div className="skel-line" style={{ width: '45%' }} />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function WarningsPage() {
   const [warnings, setWarnings] = useState<WarningCard[]>([]);
@@ -68,6 +88,7 @@ export default function WarningsPage() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [severityFilter, setSeverityFilter] = useState<'all' | WarningSeverity>('all');
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,7 +124,7 @@ export default function WarningsPage() {
       ac?.abort();
       window.clearInterval(interval);
     };
-  }, []);
+  }, [retryCount]);
 
   const filtered = useMemo(() => {
     if (severityFilter === 'all') return warnings;
@@ -141,23 +162,49 @@ export default function WarningsPage() {
               onClick={() => setSeverityFilter(k)}
               className={`panel-toggle${severityFilter === k ? ' panel-toggle-active' : ''}`}
             >
-              {k === 'all' ? `All (${warnings.length})` : `${k[0].toUpperCase()}${k.slice(1)} (${counts[k]})`}
+              {k === 'all'
+                ? `All (${warnings.length})`
+                : `${k[0].toUpperCase()}${k.slice(1)} (${counts[k]})`}
             </button>
           ))}
         </div>
       </header>
 
-      {loadState === 'loading' && warnings.length === 0 && (
-        <p className="panel-muted">Loading warnings…</p>
-      )}
+      {loadState === 'loading' && warnings.length === 0 && <SkeletonGrid />}
+
       {loadState === 'error' && (
-        <div className="status err" style={{ marginTop: '1rem' }}>
-          <div className="label">Error</div>
-          <p>{error}</p>
+        <div className="error-card" style={{ marginTop: '0.75rem' }}>
+          <div className="error-card-title">Failed to load warnings</div>
+          <p className="error-card-message">{error}</p>
+          <div className="error-card-footer">
+            <button
+              type="button"
+              className="panel-btn"
+              onClick={() => setRetryCount((c) => c + 1)}
+            >
+              Retry
+            </button>
+          </div>
         </div>
       )}
-      {loadState === 'ready' && filtered.length === 0 && (
-        <p className="panel-muted">No active warnings for the current window.</p>
+
+      {loadState === 'ready' && filtered.length === 0 && severityFilter === 'all' && (
+        <div className="empty-state" style={{ marginTop: '0.5rem' }}>
+          <p className="empty-state-title">No active warnings</p>
+          <p className="empty-state-body">
+            All zones are within normal parameters. Warnings appear when thresholds are exceeded.
+          </p>
+        </div>
+      )}
+
+      {loadState === 'ready' && filtered.length === 0 && severityFilter !== 'all' && (
+        <div className="empty-state" style={{ marginTop: '0.5rem' }}>
+          <p className="empty-state-title">No {severityFilter} warnings</p>
+          <p className="empty-state-body">
+            There are no {severityFilter}-severity warnings right now.
+            {warnings.length > 0 && ' Warnings exist at other severity levels.'}
+          </p>
+        </div>
       )}
 
       {filtered.length > 0 && (

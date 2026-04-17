@@ -58,8 +58,25 @@ function capitalize(s: string | null | undefined): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+function SkeletonRows({ count = 5 }: { count?: number }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="skel-row">
+          <div className="skel-line" style={{ width: '1.5rem', flexShrink: 0 }} />
+          <div className="skel-block">
+            <div className="skel-line" style={{ width: `${55 + (i % 3) * 12}%` }} />
+            <div className="skel-line" style={{ width: `${28 + (i % 4) * 8}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function DecisionPage() {
   const [zones, setZones] = useState<ZoneSummary[]>([]);
+  const [zonesLoading, setZonesLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [horizon, setHorizon] = useState<'24h' | '30d'>('24h');
   const [submitting, setSubmitting] = useState(false);
@@ -72,11 +89,13 @@ export default function DecisionPage() {
 
   useEffect(() => {
     const ac = new AbortController();
+    setZonesLoading(true);
     fetchZones(ac.signal)
       .then((res) => setZones(res.zones ?? []))
       .catch((e) => {
         if ((e as { name?: string })?.name === 'AbortError') return;
-      });
+      })
+      .finally(() => setZonesLoading(false));
     return () => ac.abort();
   }, []);
 
@@ -170,12 +189,16 @@ export default function DecisionPage() {
           )}
         </div>
         <form onSubmit={handleSubmit} className="form-stack">
-          <ZoneMultiSelect
-            selectedIds={selectedIds}
-            onChange={setSelectedIds}
-            max={10}
-            label="Zones to analyse"
-          />
+          {zonesLoading ? (
+            <SkeletonRows count={4} />
+          ) : (
+            <ZoneMultiSelect
+              selectedIds={selectedIds}
+              onChange={setSelectedIds}
+              max={10}
+              label="Zones to analyse"
+            />
+          )}
 
           <div>
             <span className="form-label-text">Horizon</span>
@@ -200,22 +223,26 @@ export default function DecisionPage() {
             disabled={submitting || selectedIds.length === 0}
             className="panel-btn panel-btn-primary"
           >
-            {submitting ? 'Analysing…' : 'Get Recommendation'}
+            {submitting ? (
+              <><span className="btn-spinner" aria-hidden="true" />Analysing…</>
+            ) : (
+              'Get Recommendation'
+            )}
           </button>
 
           {error && (
-            <div className="status err">
-              <div className="label">Error</div>
-              <p>{error}</p>
+            <div className="error-card">
+              <div className="error-card-title">Request failed</div>
+              <p className="error-card-message">{error}</p>
             </div>
           )}
         </form>
       </section>
 
       {submitting && !result && (
-        <p className="panel-muted" style={{ textAlign: 'center', padding: '1.5rem 0' }}>
-          Analysing zones…
-        </p>
+        <div className="empty-state">
+          <p className="empty-state-title">Analysing zones…</p>
+        </div>
       )}
 
       {result && (

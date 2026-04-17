@@ -62,10 +62,27 @@ function formatSigned(n: number, digits = 1): string {
   return `${sign}${n.toFixed(digits)}`;
 }
 
+function SkeletonRows({ count = 5 }: { count?: number }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="skel-row">
+          <div className="skel-line" style={{ width: '1.5rem', flexShrink: 0 }} />
+          <div className="skel-block">
+            <div className="skel-line" style={{ width: `${55 + (i % 3) * 12}%` }} />
+            <div className="skel-line" style={{ width: `${28 + (i % 4) * 8}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function PolicyPage() {
   const [zones, setZones] = useState<ZoneSummary[]>([]);
   const [zonesLoading, setZonesLoading] = useState(true);
   const [zonesError, setZonesError] = useState<string | null>(null);
+  const [zonesKey, setZonesKey] = useState(0);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [horizon, setHorizon] = useState<PolicyHorizon>('24h');
   const [interventions, setInterventions] = useState<DraftIntervention[]>([newDraft()]);
@@ -77,6 +94,7 @@ export default function PolicyPage() {
   useEffect(() => {
     const ac = new AbortController();
     setZonesLoading(true);
+    setZonesError(null);
     fetchZones(ac.signal)
       .then((res) => setZones(res.zones ?? []))
       .catch((e) => {
@@ -85,7 +103,7 @@ export default function PolicyPage() {
       })
       .finally(() => setZonesLoading(false));
     return () => ac.abort();
-  }, []);
+  }, [zonesKey]);
 
   const zonesById = useMemo(() => {
     const m = new Map<number, ZoneSummary>();
@@ -213,13 +231,31 @@ export default function PolicyPage() {
             <div className="panel-card-title">Configure</div>
           </div>
           <form onSubmit={handleSubmit} className="form-stack">
-            <ZoneMultiSelect
-              selectedIds={selectedIds}
-              onChange={setSelectedIds}
-              max={10}
-              label="Zones"
-            />
-            {zonesError && <p className="panel-error">{zonesError}</p>}
+            {zonesLoading ? (
+              <SkeletonRows count={4} />
+            ) : (
+              <ZoneMultiSelect
+                selectedIds={selectedIds}
+                onChange={setSelectedIds}
+                max={10}
+                label="Zones"
+              />
+            )}
+            {zonesError && (
+              <div className="error-card">
+                <div className="error-card-title">Failed to load zones</div>
+                <p className="error-card-message">{zonesError}</p>
+                <div className="error-card-footer">
+                  <button
+                    type="button"
+                    className="panel-btn"
+                    onClick={() => setZonesKey((k) => k + 1)}
+                  >
+                    Retry
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div>
               <span className="form-label-text">Horizon</span>
@@ -273,12 +309,16 @@ export default function PolicyPage() {
               disabled={submitting || zonesLoading}
               className="panel-btn panel-btn-primary"
             >
-              {submitting ? 'Simulating…' : 'Run simulation'}
+              {submitting ? (
+                <><span className="btn-spinner" aria-hidden="true" />Simulating…</>
+              ) : (
+                'Run simulation'
+              )}
             </button>
             {error && (
-              <div className="status err">
-                <div className="label">Error</div>
-                <p>{error}</p>
+              <div className="error-card">
+                <div className="error-card-title">Simulation failed</div>
+                <p className="error-card-message">{error}</p>
               </div>
             )}
           </form>
@@ -290,9 +330,16 @@ export default function PolicyPage() {
             {result && <CachePill hit={cacheHit} />}
           </div>
           {!result && !submitting && (
-            <p className="panel-muted">Submit the form to run a simulation.</p>
+            <div className="empty-state">
+              <p className="empty-state-title">No simulation yet</p>
+              <p className="empty-state-body">Configure zones and interventions, then run a simulation to see results.</p>
+            </div>
           )}
-          {submitting && <p className="panel-muted">Computing simulation…</p>}
+          {submitting && (
+            <div className="empty-state">
+              <p className="empty-state-title">Computing simulation…</p>
+            </div>
+          )}
           {result && (
             <div className="policy-result-stack">
               <div className="policy-headline-row">

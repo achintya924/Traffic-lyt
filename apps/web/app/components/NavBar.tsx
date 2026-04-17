@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useState } from 'react';
 
 const LINKS: { href: string; label: string; primary?: boolean }[] = [
   { href: '/map', label: 'Map' },
@@ -14,10 +15,21 @@ const LINKS: { href: string; label: string; primary?: boolean }[] = [
 
 export default function NavBar() {
   const pathname = usePathname() ?? '';
+  const [menuOpen, setMenuOpen] = useState(false);
   return (
     <nav className="site-nav" aria-label="Primary">
-      <Link href="/" className="site-nav-brand">Traffic-lyt</Link>
-      <div className="site-nav-links">
+      <Link href="/" className="site-nav-brand" onClick={() => setMenuOpen(false)}>
+        Traffic-lyt
+      </Link>
+      <button
+        className="site-nav-hamburger"
+        aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((o) => !o)}
+      >
+        {menuOpen ? '✕' : '☰'}
+      </button>
+      <div className={`site-nav-links${menuOpen ? ' nav-open' : ''}`}>
         {LINKS.map((l) => {
           const active = pathname === l.href || pathname.startsWith(l.href + '/');
           return (
@@ -26,6 +38,7 @@ export default function NavBar() {
               href={l.href}
               className={`site-nav-link${l.primary ? ' site-nav-link-action' : ''}${active ? ' site-nav-link-active' : ''}`}
               aria-current={active ? 'page' : undefined}
+              onClick={() => setMenuOpen(false)}
             >
               {l.label}
             </Link>

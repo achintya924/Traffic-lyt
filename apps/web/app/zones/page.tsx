@@ -28,15 +28,55 @@ function trendBadge(direction: string, pct: number) {
   );
 }
 
+function SkeletonRows({ count = 5 }: { count?: number }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="skel-row">
+          <div className="skel-line" style={{ width: '1.5rem', flexShrink: 0 }} />
+          <div className="skel-block">
+            <div className="skel-line" style={{ width: `${55 + (i % 3) * 12}%` }} />
+            <div className="skel-line" style={{ width: `${28 + (i % 4) * 8}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ErrorCard({
+  title,
+  message,
+  onRetry,
+}: {
+  title: string;
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="error-card">
+      <div className="error-card-title">{title}</div>
+      <p className="error-card-message">{message}</p>
+      <div className="error-card-footer">
+        <button type="button" className="panel-btn" onClick={onRetry}>
+          Retry
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function ZonesPage() {
   const [zones, setZones] = useState<ZoneSummary[]>([]);
   const [zonesLoading, setZonesLoading] = useState(true);
   const [zonesError, setZonesError] = useState<string | null>(null);
+  const [zonesKey, setZonesKey] = useState(0);
   const [sortBy, setSortBy] = useState<ZoneRankingsSortBy>('risk');
   const [rankings, setRankings] = useState<ZoneRankingRow[]>([]);
   const [rankingsCacheHit, setRankingsCacheHit] = useState(false);
   const [rankingsLoading, setRankingsLoading] = useState(true);
   const [rankingsError, setRankingsError] = useState<string | null>(null);
+  const [rankingsKey, setRankingsKey] = useState(0);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [filter, setFilter] = useState('');
 
@@ -45,9 +85,7 @@ export default function ZonesPage() {
     setZonesLoading(true);
     setZonesError(null);
     fetchZones(ac.signal)
-      .then((res) => {
-        setZones(res.zones ?? []);
-      })
+      .then((res) => setZones(res.zones ?? []))
       .catch((e) => {
         if ((e as { name?: string })?.name === 'AbortError') return;
         setZonesError(e instanceof Error ? e.message : String(e));
@@ -55,7 +93,7 @@ export default function ZonesPage() {
       })
       .finally(() => setZonesLoading(false));
     return () => ac.abort();
-  }, []);
+  }, [zonesKey]);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -73,7 +111,7 @@ export default function ZonesPage() {
       })
       .finally(() => setRankingsLoading(false));
     return () => ac.abort();
-  }, [sortBy]);
+  }, [sortBy, rankingsKey]);
 
   const addZone = useCallback((id: number) => {
     setSelectedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
@@ -116,10 +154,22 @@ export default function ZonesPage() {
               </button>
             ))}
           </div>
-          {rankingsLoading && <p className="panel-muted">Loading rankings…</p>}
-          {rankingsError && <p className="panel-error">{rankingsError}</p>}
+
+          {rankingsLoading && <SkeletonRows count={5} />}
+          {!rankingsLoading && rankingsError && (
+            <ErrorCard
+              title="Failed to load rankings"
+              message={rankingsError}
+              onRetry={() => setRankingsKey((k) => k + 1)}
+            />
+          )}
           {!rankingsLoading && !rankingsError && rankings.length === 0 && (
-            <p className="panel-muted">No rankings available.</p>
+            <div className="empty-state">
+              <p className="empty-state-title">No rankings yet</p>
+              <p className="empty-state-body">
+                Rankings appear once zone violation data has been ingested.
+              </p>
+            </div>
           )}
           {!rankingsLoading && !rankingsError && rankings.length > 0 && (
             <ol className="panel-rankings-list">
@@ -172,10 +222,30 @@ export default function ZonesPage() {
             className="panel-input"
             aria-label="Filter zones"
           />
-          {zonesLoading && <p className="panel-muted">Loading zones…</p>}
-          {zonesError && <p className="panel-error">{zonesError}</p>}
-          {!zonesLoading && !zonesError && filteredZones.length === 0 && (
-            <p className="panel-muted">No zones match.</p>
+
+          {zonesLoading && <SkeletonRows count={4} />}
+          {!zonesLoading && zonesError && (
+            <ErrorCard
+              title="Failed to load zones"
+              message={zonesError}
+              onRetry={() => setZonesKey((k) => k + 1)}
+            />
+          )}
+          {!zonesLoading && !zonesError && zones.length === 0 && (
+            <div className="empty-state">
+              <p className="empty-state-title">No zones found</p>
+              <p className="empty-state-body">
+                Add zones via the API to start analysing your area.
+              </p>
+            </div>
+          )}
+          {!zonesLoading && !zonesError && zones.length > 0 && filteredZones.length === 0 && (
+            <div className="empty-state">
+              <p className="empty-state-title">No matching zones</p>
+              <p className="empty-state-body">
+                No zones match &ldquo;{filter}&rdquo;. Try a different search term.
+              </p>
+            </div>
           )}
           {!zonesLoading && !zonesError && filteredZones.length > 0 && (
             <ul className="panel-zones-list">

@@ -1041,3 +1041,198 @@ h1 {
 }
 .decision-explain-toggle:hover { color: #0f172a; }
 .decision-explain-caret { font-size: 0.75rem; color: #94a3b8; }
+
+/* === Phase 7.1: Polish + UX Hardening === */
+
+/* --- Skeleton loading --- */
+@keyframes skel-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%       { opacity: 0.25; }
+}
+
+.skel-line {
+  height: 0.72rem;
+  border-radius: 4px;
+  background: #334155;
+  animation: skel-pulse 1.4s ease-in-out infinite;
+}
+
+.skel-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.6rem;
+  background: #0f172a;
+  border-radius: 6px;
+}
+
+.skel-block {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+/* --- Empty states --- */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1.75rem 1rem;
+  gap: 0.35rem;
+  text-align: center;
+}
+
+.empty-state-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #cbd5e1;
+  margin: 0;
+}
+
+.empty-state-body {
+  font-size: 0.78rem;
+  color: #64748b;
+  max-width: 260px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+/* --- Error card with retry --- */
+.error-card {
+  background: #1c0a0a;
+  border: 1px solid #7f1d1d;
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.error-card-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #fca5a5;
+}
+
+.error-card-message {
+  font-size: 0.78rem;
+  color: #fecaca;
+  margin: 0;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.error-card-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.15rem;
+}
+
+/* --- Button loading spinner --- */
+@keyframes btn-spin {
+  to { transform: rotate(360deg); }
+}
+
+.btn-spinner {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: btn-spin 0.55s linear infinite;
+  vertical-align: -0.1em;
+  margin-right: 0.4em;
+}
+
+/* --- Micro-interactions: transitions --- */
+.panel-btn  { transition: background 0.12s, color 0.12s, border-color 0.12s; }
+.panel-toggle { transition: background 0.12s, color 0.12s; }
+.panel-btn-primary { transition: background 0.12s; }
+
+.panel-rankings-row { transition: background 0.12s; }
+.panel-rankings-row:hover { background: #1e293b; }
+
+.panel-zone-row { transition: background 0.12s; }
+.panel-zone-row:hover { background: #1e293b; }
+
+.patrol-plan-row { transition: background 0.12s; }
+.patrol-plan-row:hover { background: #1e293b; }
+
+.warning-card { transition: transform 0.15s, box-shadow 0.15s; }
+.warning-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.decision-hotspot-row { transition: background 0.12s; }
+.decision-hotspot-row:hover { background: rgba(248, 250, 252, 0.04); }
+
+.decision-warning-row { transition: background 0.12s; }
+.decision-warning-row:hover { background: rgba(241, 245, 249, 0.04); }
+
+/* --- Mobile: NavBar hamburger --- */
+.site-nav-hamburger {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.35rem 0.5rem;
+  color: #94a3b8;
+  font-size: 1.25rem;
+  line-height: 1;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.site-nav-hamburger:hover { color: #e2e8f0; }
+
+@media (max-width: 767px) {
+  .site-nav {
+    flex-wrap: nowrap;
+    position: relative;
+    align-items: center;
+  }
+  .site-nav-hamburger { display: block; }
+  .site-nav-links {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #020617;
+    border-bottom: 1px solid #1e293b;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 0.4rem 0.5rem;
+    z-index: 999;
+    gap: 0.1rem;
+  }
+  .site-nav-links.nav-open { display: flex; }
+  .site-nav-link {
+    width: 100%;
+    padding: 0.55rem 0.75rem;
+  }
+  .site-nav-link-action {
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+  }
+}
+
+/* --- Mobile layout fixes --- */
+@media (max-width: 640px) {
+  .panel-page { padding: 0.75rem 0.65rem; }
+  .policy-totals-row { grid-template-columns: repeat(2, 1fr); }
+  .policy-bar-row {
+    grid-template-columns: 52px 1fr 44px;
+    font-size: 0.68rem;
+  }
+  .explain-row {
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+  .explain-code { min-width: unset; }
+  .decision-verdict-action { font-size: 1rem; }
+  .panel-rankings-row { flex-wrap: wrap; }
+  .patrol-plan-row { flex-wrap: wrap; }
+}
