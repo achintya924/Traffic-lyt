@@ -19,6 +19,15 @@ from sqlalchemy import text
 
 from app.db import get_connection, get_engine
 from app.policy.baseline import get_multi_zone_baseline
+from app.utils.explainability import (
+    explain_confidence,
+    explain_forecast,
+    explain_hotspot,
+    explain_patrol,
+    explain_verdict,
+    explain_warning,
+    make_explain,
+)
 from app.utils.response_cache import get_response_cache
 
 from app.routers.anomalies import GRID_SIZE_DEG
@@ -552,6 +561,39 @@ def decision_now(request: Request, body: DecisionRequest) -> dict[str, Any]:
     }
     verdict = _build_verdict(warnings_list, hotspots, overall_confidence)
 
+    explain: list[dict[str, Any]] = []
+    explain.append(explain_confidence(overall_confidence).model_dump())
+    for w in warnings_list:
+        explain.append(explain_warning(w).model_dump())
+    for h in hotspots:
+        explain.append(explain_hotspot(h).model_dump())
+    for a in patrol_block.get("assignments", []):
+        explain.append(explain_patrol(a).model_dump())
+    for z in forecast_block["zones"]:
+        explain.append(
+            explain_forecast(
+                zone_id=z.get("zone_id"),
+                total=float(z.get("total", 0.0) or 0.0),
+                horizon=body.horizon,
+            ).model_dump()
+        )
+    explain.append(
+        make_explain(
+            code="forecast_overall",
+            message=(
+                f"Combined forecast across {len(forecast_block['zones'])} zone(s): "
+                f"~{round(float(forecast_block['overall_total'] or 0.0), 2)} expected "
+                f"violations over the {body.horizon} horizon."
+            ),
+            details={
+                "overall_total": forecast_block["overall_total"],
+                "horizon": body.horizon,
+                "zone_count": len(forecast_block["zones"]),
+            },
+        ).model_dump()
+    )
+    explain.append(explain_verdict(verdict).model_dump())
+
     payload = {
         "meta": {
             "request_id": request_id,
@@ -564,6 +606,7 @@ def decision_now(request: Request, body: DecisionRequest) -> dict[str, Any]:
         "patrol": patrol_block,
         "forecast": forecast_block,
         "verdict": verdict,
+        "explain": explain,
     }
     resp_cache.set(cache_key, payload, DECISION_TTL)
     return payload

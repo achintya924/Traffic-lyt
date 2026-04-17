@@ -7,6 +7,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.models.explain import ExplainEntry  # noqa: F401  re-exported for back-compat
+
 
 PolicyHorizon = Literal["24h", "30d"]
 
@@ -106,12 +108,6 @@ class ZoneDelta(BaseModel):
     zone_id: str
     delta: float
     delta_pct: float | None = None
-
-
-class ExplainEntry(BaseModel):
-    code: str
-    message: str
-    details: dict = Field(default_factory=dict)
 
 
 class BaselineSimulatedBlock(BaseModel):

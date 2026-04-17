@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import text
 
 from app.db import get_connection, get_engine
+from app.utils.explainability import explain_warning
 from app.utils.rate_limiter import rate_limit
 from app.utils.response_cache import get_response_cache, make_response_key
 from app.utils.time_anchor import to_utc_iso
@@ -324,7 +325,9 @@ def get_warnings(
             "response_cache": "miss",
         }
 
-        payload = {"warnings": warnings, "meta": meta}
+        explain = [explain_warning(w).model_dump() for w in warnings]
+
+        payload = {"warnings": warnings, "meta": meta, "explain": explain}
         resp_cache.set(resp_key, payload, WARNINGS_TTL)
         return payload
 
@@ -342,4 +345,5 @@ def _empty_warnings_payload(
             "anchor_ts": anchor_ts,
             "response_cache": "miss",
         },
+        "explain": [],
     }

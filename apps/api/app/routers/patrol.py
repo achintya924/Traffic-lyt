@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.db import get_connection, get_engine
+from app.utils.explainability import explain_patrol, make_explain
 from app.utils.rate_limiter import rate_limit
 from app.utils.response_cache import get_response_cache, make_response_key
 from app.utils.time_anchor import to_utc_iso
@@ -403,7 +404,24 @@ def allocate_patrol(request: Request, body: PatrolAllocateRequest) -> dict[str, 
         if os.getenv("DEBUG") == "1":
             meta["cache_key_hash"] = key_hash
 
-        payload = {"plan": plan, "meta": meta}
+        explain: list[dict[str, Any]] = [explain_patrol(a).model_dump() for a in plan]
+        explain.append(
+            make_explain(
+                code="patrol_plan_summary",
+                message=(
+                    f"Allocated {body.units - units_left} of {body.units} unit(s) across "
+                    f"{len(plan)} zone(s) using the {body.strategy} strategy."
+                ),
+                details={
+                    "requested_units": body.units,
+                    "assigned_units": body.units - units_left,
+                    "zone_count": len(plan),
+                    "strategy": body.strategy,
+                },
+            ).model_dump()
+        )
+
+        payload = {"plan": plan, "meta": meta, "explain": explain}
         resp_cache.set(resp_key, payload, PATROL_ALLOCATE_TTL)
         return payload
 
@@ -445,4 +463,5 @@ def _empty_plan(request: Request, anchor_ts: str | None) -> dict[str, Any]:
             "anchor_ts": anchor_ts,
             "response_cache": "miss",
         },
+        "explain": [],
     }

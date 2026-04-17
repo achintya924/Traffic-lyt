@@ -16,6 +16,7 @@ from app.models.policy_simulation import (
 )
 from app.policy.baseline import get_multi_zone_baseline
 from app.policy.simulation import apply_simulation
+from app.utils.explainability import explain_confidence, explain_forecast
 from app.utils.response_cache import get_response_cache
 from app.utils.policy_normalization import normalize_policy_request, policy_cache_key
 
@@ -69,6 +70,13 @@ def simulate_policy(request: Request, body: PolicySimulationRequest) -> PolicySi
         horizon=body.horizon,
     )
 
+    enriched_explain = list(explain)
+    enriched_explain.insert(0, explain_confidence(baseline_block.confidence))
+    for z in baseline_block.zones:
+        enriched_explain.append(
+            explain_forecast(zone_id=z.zone_id, total=z.total, horizon=body.horizon)
+        )
+
     meta = PolicySimulationMeta(
         request_id=request_id,
         anchor_ts=anchor_ts_str,
@@ -79,7 +87,7 @@ def simulate_policy(request: Request, body: PolicySimulationRequest) -> PolicySi
         baseline=baseline_block,
         simulated=simulated_block,
         delta=delta_block,
-        explain=explain,
+        explain=enriched_explain,
     )
     resp_cache.set(cache_key, response.model_dump(), POLICY_SIMULATION_TTL)
     return response
