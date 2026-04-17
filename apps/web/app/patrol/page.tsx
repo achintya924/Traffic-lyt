@@ -13,6 +13,7 @@ import {
 } from '@/app/lib/api';
 import ZoneMultiSelect from '@/app/components/ZoneMultiSelect';
 import CachePill from '@/app/components/CachePill';
+import { downloadCsv, csvDate } from '@/app/lib/csv';
 import type { PatrolMapMarker } from '@/app/patrol/PatrolMap';
 
 const PatrolMap = dynamic(() => import('@/app/patrol/PatrolMap'), { ssr: false });
@@ -97,6 +98,15 @@ export default function PatrolPage() {
     zones.forEach((z) => m.set(z.id, z));
     return m;
   }, [zones]);
+
+  const handleExportPlan = () => {
+    if (!result) return;
+    const rows: (string | number)[][] = [
+      ['zone_id', 'zone_name', 'units_assigned', 'strategy'],
+      ...result.plan.map((a) => [a.zone.id, a.zone.name, a.assigned_units, strategy]),
+    ];
+    downloadCsv(rows, `patrol-allocation-${csvDate()}.csv`);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -262,7 +272,14 @@ export default function PatrolPage() {
         <section className="panel-card">
           <div className="panel-card-header">
             <div className="panel-card-title">Plan</div>
-            {result && <CachePill hit={cacheHit} />}
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              {result && result.plan.length > 0 && (
+                <button type="button" className="panel-btn" onClick={handleExportPlan}>
+                  Export CSV
+                </button>
+              )}
+              {result && <CachePill hit={cacheHit} />}
+            </div>
           </div>
           {!result && !submitting && (
             <div className="empty-state">

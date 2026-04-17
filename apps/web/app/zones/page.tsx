@@ -10,6 +10,7 @@ import {
 } from '@/app/lib/api';
 import ZoneComparePanel from '@/app/components/ZoneComparePanel';
 import CachePill from '@/app/components/CachePill';
+import { downloadCsv, csvDate } from '@/app/lib/csv';
 
 const SORT_OPTIONS: { value: ZoneRankingsSortBy; label: string }[] = [
   { value: 'risk', label: 'Risk' },
@@ -113,6 +114,14 @@ export default function ZonesPage() {
     return () => ac.abort();
   }, [sortBy, rankingsKey]);
 
+  const handleExportRankings = () => {
+    const rows: (string | number)[][] = [
+      ['zone_id', 'zone_name', 'risk_score', 'trend_direction', 'violation_count', 'wow_delta', 'mom_delta'],
+      ...rankings.map((r) => [r.zone_id, r.name, r.score, r.trend_direction, r.total_count, r.percent_change, '']),
+    ];
+    downloadCsv(rows, `zones-rankings-${csvDate()}.csv`);
+  };
+
   const addZone = useCallback((id: number) => {
     setSelectedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
   }, []);
@@ -138,7 +147,14 @@ export default function ZonesPage() {
         <section className="panel-card">
           <div className="panel-card-header">
             <div className="panel-card-title">Rankings</div>
-            <CachePill hit={rankingsCacheHit} />
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              {rankings.length > 0 && (
+                <button type="button" className="panel-btn" onClick={handleExportRankings}>
+                  Export CSV
+                </button>
+              )}
+              <CachePill hit={rankingsCacheHit} />
+            </div>
           </div>
           <div className="panel-toggle-row" role="tablist" aria-label="Sort rankings by">
             {SORT_OPTIONS.map((opt) => (

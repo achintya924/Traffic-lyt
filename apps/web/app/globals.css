@@ -1236,3 +1236,96 @@ h1 {
   .panel-rankings-row { flex-wrap: wrap; }
   .patrol-plan-row { flex-wrap: wrap; }
 }
+
+/* --- Print / export --- */
+.no-print { /* hidden via @media print below */ }
+
+@media print {
+  .no-print { display: none !important; }
+  .site-nav { display: none !important; }
+  .panel-btn,
+  .panel-toggle,
+  .panel-toggle-row { display: none !important; }
+
+  body {
+    background: #fff !important;
+    color: #111 !important;
+    font-size: 11pt;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .panel-page {
+    padding: 0.5cm 1cm !important;
+    max-width: none !important;
+  }
+
+  .panel-header { margin-bottom: 0.5cm; }
+  .panel-header h1 { font-size: 18pt; color: #111 !important; }
+  .panel-subtitle { color: #444 !important; }
+
+  .panel-grid {
+    display: block !important;
+  }
+
+  .panel-card {
+    background: #fff !important;
+    box-shadow: none !important;
+    border: 1px solid #ccc !important;
+    border-radius: 6px;
+    margin-bottom: 0.4cm;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .panel-card-title { color: #111 !important; }
+  .panel-muted,
+  .panel-muted-inline { color: #555 !important; }
+
+  /* Decision verdict */
+  .decision-verdict {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .decision-verdict-urgent  { background: #fff0f0 !important; border-color: #dc2626 !important; }
+  .decision-verdict-caution { background: #fffbeb !important; border-color: #d97706 !important; }
+  .decision-verdict-info    { background: #eff6ff !important; border-color: #2563eb !important; }
+  .decision-verdict-clear   { background: #f0fdf4 !important; border-color: #16a34a !important; }
+
+  .decision-verdict-action   { color: #111 !important; font-size: 13pt; }
+  .decision-verdict-reasoning { color: #333 !important; }
+
+  .decision-urgency-badge {
+    border: 1px solid #999 !important;
+  }
+  .decision-urgency-urgent  { background: #dc2626 !important; color: #fff !important; }
+  .decision-urgency-caution { background: #d97706 !important; color: #fff !important; }
+  .decision-urgency-info    { background: #2563eb !important; color: #fff !important; }
+  .decision-urgency-clear   { background: #16a34a !important; color: #fff !important; }
+
+  /* Confidence bar */
+  .decision-confidence-bar-track { background: #ddd !important; }
+
+  /* Warnings */
+  .decision-warning-row { break-inside: avoid; }
+  .warning-type-badge {
+    background: #eee !important;
+    color: #111 !important;
+  }
+
+  /* Hotspots */
+  .decision-hotspot-row { break-inside: avoid; }
+  .decision-risk-badge[data-risk="high"]   { background: #ffe4e4 !important; color: #b91c1c !important; }
+  .decision-risk-badge[data-risk="medium"] { background: #fef9c3 !important; color: #92400e !important; }
+  .decision-risk-badge[data-risk="low"]    { background: #dcfce7 !important; color: #15803d !important; }
+
+  /* Patrol */
+  .patrol-plan-row { break-inside: avoid; }
+  .patrol-units-pill { background: #e2e8f0 !important; color: #111 !important; }
+
+  /* Explain */
+  .decision-explain-toggle { display: none !important; }
+  .explain-list { display: block !important; }
+  .explain-row { break-inside: avoid; }
+  .explain-code { background: #f1f5f9 !important; color: #111 !important; }
+}

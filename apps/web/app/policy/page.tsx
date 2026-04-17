@@ -12,6 +12,7 @@ import {
 } from '@/app/lib/api';
 import ZoneMultiSelect from '@/app/components/ZoneMultiSelect';
 import CachePill from '@/app/components/CachePill';
+import { downloadCsv, csvDate } from '@/app/lib/csv';
 
 const MAX_INTERVENTIONS = 5;
 type InterventionType = 'enforcement_intensity' | 'patrol_units' | 'peak_hour_reduction';
@@ -125,6 +126,15 @@ export default function PolicyPage() {
     setInterventions((prev) =>
       prev.map((i) => (i.key === key ? { ...i, ...patch } : i))
     );
+  };
+
+  const handleExportResult = () => {
+    if (!result) return;
+    const rows: (string | number)[][] = [
+      ['zone_id', 'baseline_total', 'simulated_total', 'delta', 'delta_pct', 'confidence_label'],
+      ...perZone.map((r) => [r.zone_id, r.baseline, r.simulated, r.delta, r.delta_pct ?? '', confidenceLabel ?? '']),
+    ];
+    downloadCsv(rows, `policy-simulation-${csvDate()}.csv`);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -327,7 +337,14 @@ export default function PolicyPage() {
         <section className="panel-card">
           <div className="panel-card-header">
             <div className="panel-card-title">Result</div>
-            {result && <CachePill hit={cacheHit} />}
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              {result && (
+                <button type="button" className="panel-btn" onClick={handleExportResult}>
+                  Export CSV
+                </button>
+              )}
+              {result && <CachePill hit={cacheHit} />}
+            </div>
           </div>
           {!result && !submitting && (
             <div className="empty-state">

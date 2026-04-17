@@ -9,6 +9,7 @@ import {
 } from '@/app/lib/api';
 import ZoneMultiSelect from '@/app/components/ZoneMultiSelect';
 import CachePill from '@/app/components/CachePill';
+// no csv import needed — decision page uses window.print() only
 
 const SEVERITY_COLOR: Record<string, string> = {
   high: '#ef4444',
@@ -128,6 +129,11 @@ export default function DecisionPage() {
     []
   );
 
+  const handlePrint = () => {
+    setExplainOpen(true);
+    setTimeout(() => window.print(), 0);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedIds.length === 0) {
@@ -181,7 +187,7 @@ export default function DecisionPage() {
         <p className="panel-subtitle">What should I do right now?</p>
       </header>
 
-      <section className="panel-card" style={{ marginBottom: '1rem' }}>
+      <section className="panel-card no-print" style={{ marginBottom: '1rem' }}>
         <div className="panel-card-header">
           <div className="panel-card-title">Configure</div>
           {autoRefreshActive && (
@@ -257,6 +263,14 @@ export default function DecisionPage() {
                 {URGENCY_LABEL[urgency]}
               </span>
               <CachePill hit={cacheHit} />
+              <button
+                type="button"
+                className="panel-btn no-print"
+                style={{ marginLeft: 'auto' }}
+                onClick={handlePrint}
+              >
+                Print Report
+              </button>
             </div>
             <p className="decision-verdict-action">
               {result.verdict?.priority_action ?? 'No action available.'}
