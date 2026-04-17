@@ -485,6 +485,86 @@ export type PolicySimulateResponse = {
   explain: WarningsExplainEntry[];
 };
 
+// --- Phase 6.3: Decision endpoint ---
+
+export type DecisionHorizon = '24h' | '30d';
+
+export type DecisionHotspot = {
+  cell_lon: number;
+  cell_lat: number;
+  count: number;
+  zone_id: number;
+  zone_name: string;
+};
+
+export type DecisionConfidence = {
+  confidence_score: number;
+  confidence_label: 'low' | 'medium' | 'high';
+  details?: Record<string, unknown> | null;
+};
+
+export type DecisionPatrolPlan = {
+  strategy: string;
+  units: number;
+  assignments: PatrolAssignment[];
+};
+
+export type DecisionForecastZone = {
+  zone_id: string;
+  total: number;
+  confidence_score?: number | null;
+  confidence_label?: string | null;
+};
+
+export type DecisionForecastBlock = {
+  horizon: DecisionHorizon;
+  zones: DecisionForecastZone[];
+  overall_total: number;
+};
+
+export type DecisionVerdict = {
+  priority_action: string;
+  reasoning: string;
+};
+
+export type DecisionResponse = {
+  meta: {
+    request_id: string;
+    anchor_ts: string;
+    response_cache: { status: 'hit' | 'miss'; key?: string | null };
+  };
+  confidence: DecisionConfidence | null;
+  warnings: WarningCard[];
+  hotspots: DecisionHotspot[];
+  patrol: DecisionPatrolPlan;
+  forecast: DecisionForecastBlock;
+  verdict: DecisionVerdict;
+  explain: WarningsExplainEntry[];
+};
+
+export type DecisionNowBody = {
+  zones: string[];
+  horizon: DecisionHorizon;
+  anchor_ts?: string | null;
+};
+
+export async function fetchDecisionNow(
+  body: DecisionNowBody,
+  signal?: AbortSignal
+): Promise<DecisionResponse> {
+  const res = await fetch(`${API_BASE}/api/decision/now`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`Decision: HTTP ${res.status}${detail ? ` ${detail}` : ''}`);
+  }
+  return res.json();
+}
+
 export async function fetchPolicySimulate(
   body: PolicySimulateBody,
   signal?: AbortSignal

@@ -3,12 +3,13 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-const LINKS = [
+const LINKS: { href: string; label: string; primary?: boolean }[] = [
   { href: '/map', label: 'Map' },
   { href: '/zones', label: 'Zones' },
   { href: '/warnings', label: 'Warnings' },
   { href: '/patrol', label: 'Patrol' },
   { href: '/policy', label: 'Policy' },
+  { href: '/decision', label: 'Decision', primary: true },
 ];
 
 export default function NavBar() {
@@ -23,7 +24,7 @@ export default function NavBar() {
             <Link
               key={l.href}
               href={l.href}
-              className={`site-nav-link${active ? ' site-nav-link-active' : ''}`}
+              className={`site-nav-link${l.primary ? ' site-nav-link-action' : ''}${active ? ' site-nav-link-active' : ''}`}
               aria-current={active ? 'page' : undefined}
             >
               {l.label}
