@@ -296,3 +296,208 @@ export async function fetchZoneCompare(
   if (!res.ok) throw new Error(`Zone compare: HTTP ${res.status}`);
   return res.json();
 }
+
+// --- Phase 6.1: Zone rankings + Warnings ---
+
+export type ZoneRankingsSortBy = 'risk' | 'trend' | 'volume';
+
+export type ZoneRankingRow = {
+  zone_id: number;
+  name: string;
+  zone_type: string;
+  total_count: number;
+  trend_direction: string;
+  percent_change: number;
+  score: number;
+};
+
+export type ZoneRankingsResponse = {
+  rankings: ZoneRankingRow[];
+  meta?: { response_cache?: 'hit' | 'miss'; anchor_ts?: string | null; [k: string]: unknown };
+};
+
+export async function fetchZoneRankings(
+  params?: { sort_by?: ZoneRankingsSortBy; limit?: number },
+  signal?: AbortSignal
+): Promise<ZoneRankingsResponse> {
+  const p = new URLSearchParams();
+  p.set('sort_by', params?.sort_by ?? 'risk');
+  p.set('limit', String(params?.limit ?? 20));
+  const res = await fetch(`${API_BASE}/api/zones/rankings?${p}`, { signal });
+  if (!res.ok) throw new Error(`Rankings: HTTP ${res.status}`);
+  return res.json();
+}
+
+export type WarningSeverity = 'high' | 'medium' | 'low';
+export type WarningType = 'trend_up' | 'wow_spike' | 'mom_spike' | 'anomaly_cluster';
+
+export type WarningCard = {
+  warning_type: WarningType | string;
+  severity: WarningSeverity;
+  zone: { id: number; name: string; zone_type: string };
+  headline: string;
+  details?: Record<string, unknown>;
+  recommendation_hint?: string;
+};
+
+export type WarningsExplainEntry = {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+};
+
+export type WarningsResponse = {
+  warnings: WarningCard[];
+  explain?: WarningsExplainEntry[];
+  meta?: { response_cache?: 'hit' | 'miss'; anchor_ts?: string | null; [k: string]: unknown };
+};
+
+export async function fetchWarnings(
+  params?: { limit?: number },
+  signal?: AbortSignal
+): Promise<WarningsResponse> {
+  const p = new URLSearchParams();
+  p.set('scope', 'zones');
+  p.set('limit', String(params?.limit ?? 25));
+  const res = await fetch(`${API_BASE}/api/warnings?${p}`, { signal });
+  if (!res.ok) throw new Error(`Warnings: HTTP ${res.status}`);
+  return res.json();
+}
+
+// --- Phase 6.2: Patrol allocation ---
+
+export type PatrolStrategy = 'balanced' | 'risk_max' | 'trend_focus';
+
+export type PatrolAssignment = {
+  zone: { id: number; name: string; zone_type: string };
+  assigned_units: number;
+  priority_score: number;
+  reasons: { signal: string; value: number | boolean | string }[];
+  recommendation_hint?: string;
+};
+
+export type PatrolAllocateResponse = {
+  plan: PatrolAssignment[];
+  meta?: { response_cache?: 'hit' | 'miss'; anchor_ts?: string | null; [k: string]: unknown };
+  explain?: WarningsExplainEntry[];
+};
+
+export type PatrolAllocateBody = {
+  units: number;
+  strategy: PatrolStrategy;
+  period?: 'current' | 'wow' | 'mom';
+  shift_hours?: number;
+  exclude_zone_ids?: number[];
+};
+
+export async function fetchPatrolAllocate(
+  body: PatrolAllocateBody,
+  signal?: AbortSignal
+): Promise<PatrolAllocateResponse> {
+  const res = await fetch(`${API_BASE}/api/patrol/allocate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`Patrol: HTTP ${res.status}${detail ? ` ${detail}` : ''}`);
+  }
+  return res.json();
+}
+
+// --- Phase 6.2: Policy simulation ---
+
+export type PolicyHorizon = '24h' | '30d';
+
+export type EnforcementIntensityIntervention = {
+  type: 'enforcement_intensity';
+  pct: number;
+};
+
+export type PatrolUnitsIntervention = {
+  type: 'patrol_units';
+  from_units: number;
+  to_units: number;
+};
+
+export type PeakHourReductionIntervention = {
+  type: 'peak_hour_reduction';
+  pct: number;
+};
+
+export type PolicyIntervention =
+  | EnforcementIntensityIntervention
+  | PatrolUnitsIntervention
+  | PeakHourReductionIntervention;
+
+export type PolicySimulateBody = {
+  zones: string[];
+  horizon: PolicyHorizon;
+  interventions: PolicyIntervention[];
+  anchor_ts?: string | null;
+};
+
+export type PolicyConfidenceLabel = 'low' | 'medium' | 'high';
+
+export type PolicyZoneTotal = {
+  zone_id: string;
+  total: number;
+  confidence_score?: number | null;
+  confidence_label?: PolicyConfidenceLabel | null;
+};
+
+export type PolicyZoneDelta = {
+  zone_id: string;
+  delta: number;
+  delta_pct: number | null;
+};
+
+export type PolicyConfidenceBlock = {
+  score: number;
+  label: PolicyConfidenceLabel;
+  details?: Record<string, unknown> | null;
+};
+
+export type PolicyBaselineBlock = {
+  horizon: PolicyHorizon;
+  zones: PolicyZoneTotal[];
+  overall_total: number;
+  confidence?: PolicyConfidenceBlock | null;
+};
+
+export type PolicyDeltaBlock = {
+  zones: PolicyZoneDelta[];
+  overall_delta: number;
+  overall_delta_pct: number | null;
+};
+
+export type PolicySimulateResponse = {
+  meta: {
+    request_id: string;
+    anchor_ts: string;
+    response_cache: { status: 'hit' | 'miss'; key?: string | null };
+  };
+  baseline: PolicyBaselineBlock;
+  simulated: PolicyBaselineBlock;
+  delta: PolicyDeltaBlock;
+  explain: WarningsExplainEntry[];
+};
+
+export async function fetchPolicySimulate(
+  body: PolicySimulateBody,
+  signal?: AbortSignal
+): Promise<PolicySimulateResponse> {
+  const res = await fetch(`${API_BASE}/api/policy/simulate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`Policy: HTTP ${res.status}${detail ? ` ${detail}` : ''}`);
+  }
+  return res.json();
+}
