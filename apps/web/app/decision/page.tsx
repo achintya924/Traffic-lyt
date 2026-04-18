@@ -85,8 +85,20 @@ export default function DecisionPage() {
   const [error, setError] = useState<string | null>(null);
   const [explainOpen, setExplainOpen] = useState(false);
   const [autoRefreshActive, setAutoRefreshActive] = useState(false);
+  const [bannerDismissed, setBannerDismissed] = useState(true);
   const abortRef = useRef<AbortController | null>(null);
   const lastParamsRef = useRef<{ zones: string[]; horizon: '24h' | '30d' } | null>(null);
+
+  useEffect(() => {
+    if (!localStorage.getItem('decision-walkthrough-dismissed')) {
+      setBannerDismissed(false);
+    }
+  }, []);
+
+  const dismissBanner = () => {
+    localStorage.setItem('decision-walkthrough-dismissed', '1');
+    setBannerDismissed(true);
+  };
 
   useEffect(() => {
     const ac = new AbortController();
@@ -186,6 +198,35 @@ export default function DecisionPage() {
         <h1>Decision Dashboard</h1>
         <p className="panel-subtitle">What should I do right now?</p>
       </header>
+
+      {!bannerDismissed && (
+        <div className="walkthrough-banner no-print" role="note">
+          <button
+            type="button"
+            className="walkthrough-banner-dismiss"
+            onClick={dismissBanner}
+            aria-label="Dismiss guide"
+          >
+            ✕
+          </button>
+          <p className="walkthrough-banner-text">
+            <strong>New here?</strong> Try this: Select 2–3 zones, choose a horizon,
+            and click <em>Get Recommendation</em> to see a unified action plan.
+          </p>
+          <div className="walkthrough-steps" aria-label="Steps">
+            {(['Step 1 — Select zones', 'Step 2 — Choose horizon', 'Step 3 — Get Recommendation'] as const).map(
+              (label, i, arr) => (
+                <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <span className="walkthrough-step">{label}</span>
+                  {i < arr.length - 1 && (
+                    <span className="walkthrough-step-arrow" aria-hidden="true">→</span>
+                  )}
+                </span>
+              )
+            )}
+          </div>
+        </div>
+      )}
 
       <section className="panel-card no-print" style={{ marginBottom: '1rem' }}>
         <div className="panel-card-header">

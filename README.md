@@ -1,499 +1,255 @@
 # Traffic-lyt
 
-NYC-first traffic/parking violations analytics.
+**NYC traffic violation analytics platform** — spatial hotspot detection, zone-level trend analysis, early warnings, patrol allocation, policy simulation, and unified decision support.
 
-- **Phase 0:** Repo scaffolding + local infra (Docker, FastAPI, Next.js, PostGIS).
-- **Phase 1:** Data in, data out — load sample CSV, violations API, map UI.
-- **Phase 2.0:** Violation filters, GET /violations/stats, map shows filtered total; API tests (pytest).
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=flat-square&logo=fastapi&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-14-black?style=flat-square&logo=next.js)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-316192?style=flat-square&logo=postgresql&logoColor=white)
+![PostGIS](https://img.shields.io/badge/PostGIS-3.4-4479A1?style=flat-square)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)
 
-## Repo structure
+---
 
-```
-traffic-lyt/
-├── apps/
-│   ├── api/          # FastAPI (app.main, app.scripts.ingest_nyc)
-│   └── web/          # Next.js + TypeScript (/map)
-├── data/             # Sample CSV for ingestion
-├── infra/
-│   └── docker-compose.yml
-├── scripts/          # One-off helpers (e.g. generate sample CSV)
-├── .env.example
-├── .gitignore
-├── Makefile          # make ingest, make up, make down
-└── README.md
-```
+## Features
 
-## Prerequisites
+| # | Feature | Description |
+|---|---------|-------------|
+| 1 | **Interactive Map** | Live violation markers, animated heatmap overlay, hotspot grid, forecast risk layer |
+| 2 | **Zone Analytics** | Per-neighborhood totals, time-series, top violation types, trend direction |
+| 3 | **Zone Rankings** | Sort zones by risk score, trend velocity, or raw volume |
+| 4 | **Early Warnings** | Automatic warning cards for trend spikes, WoW/MoM anomalies, and anomaly clusters |
+| 5 | **Patrol Allocation** | Deterministic unit-assignment recommendations across zones with reason chips |
+| 6 | **Policy Simulator** | Model enforcement interventions (intensity, patrol units, peak-hour reduction) against a forecast baseline |
+| 7 | **Decision Dashboard** | Unified "what should I do right now?" recommendation — verdict, confidence, hotspots, patrol plan, forecast |
+| 8 | **Export & Reporting** | CSV export on Zones, Patrol, and Policy pages; printable Decision report via browser print dialog |
 
-- **Windows:** Docker Desktop with WSL2 or Hyper-V backend.
-- **Docker & Compose:** Required.
+---
 
-Check from a terminal (PowerShell or Git Bash):
+## Screenshots
 
-```powershell
+> _Add screenshots here after first run._
+
+| Page | Screenshot |
+|------|-----------|
+| Map | ![Map page — violation markers and heatmap overlay](docs/screenshots/map.png) |
+| Decision Dashboard | ![Decision Dashboard — verdict card and patrol recommendation](docs/screenshots/decision.png) |
+| Patrol Allocation | ![Patrol Allocation — priority-ranked zone list](docs/screenshots/patrol.png) |
+| Policy Simulator | ![Policy Simulator — baseline vs simulated comparison bars](docs/screenshots/policy.png) |
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Next.js 14 (App Router), TypeScript, Leaflet, CSS |
+| Backend | FastAPI 0.115, SQLAlchemy 2, scikit-learn, numpy |
+| Database | PostgreSQL 16 + PostGIS 3.4 |
+| Infrastructure | Docker Compose |
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- Docker Desktop (WSL2 or Hyper-V backend on Windows)
+- `docker compose` v2
+
+```bash
 docker --version
 docker compose version
 ```
 
-You should see version output for both. If `docker compose` is missing, use `docker-compose` (with hyphen) and substitute that in the commands below.
+### 1 — Clone and configure
 
-## Setup
+```bash
+git clone <repo-url>
+cd Traffic-lyt
+cp .env.example .env          # defaults work out of the box
+```
 
-1. **Clone or open the repo** and go to the repo root:
+### 2 — Start the stack
 
-   ```powershell
-   cd "c:\Users\Achintya Singh\Documents\Traffic-lyt"
-   ```
-
-2. **Create env file** from the example:
-
-   ```powershell
-   copy .env.example .env
-   ```
-
-   Edit `.env` if you want different DB credentials or API URL. Defaults work for local Docker.
-
-## Run (one command)
-
-From the **repo root**:
-
-```powershell
+```bash
 docker compose -f infra/docker-compose.yml up --build
 ```
 
-- First run will build the API and web images and pull PostGIS; later runs are faster.
-- When you see the API and web logs and no errors, the stack is up.
-
-**Endpoints:**
+First build pulls PostGIS and installs all deps (~2 min). Subsequent starts are fast.
 
 | Service | URL |
-|--------|-----|
-| Web | http://localhost:3000 |
+|---------|-----|
+| Web app | http://localhost:3000 |
 | API | http://localhost:8000 |
-| API docs | http://localhost:8000/docs |
-| DB (host) | localhost:5432 |
+| API docs (Swagger) | http://localhost:8000/docs |
+| PostgreSQL | localhost:5432 |
 
-The web app calls the API from the **browser** using `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8000`). Container-to-container: the API uses hostname `db` for PostgreSQL; the web does not call the API from inside the container.
+### 3 — Initialise zones
 
-## Sanity checks (curl)
-
-With the stack running, from another terminal:
-
-```powershell
-curl http://localhost:8000/health
-# Expect: {"status":"ok"}
-
-curl http://localhost:8000/db-check
-# Expect: {"db":"ok"}
+```bash
+docker compose -f infra/docker-compose.yml exec api python -m app.scripts.init_nyc_zones
 ```
 
-Then open http://localhost:3000 — you should see "Traffic-lyt Phase 0 ✅" and the same health/db-check payloads on the page.
+Inserts 8 realistic NYC neighborhood zones (Midtown Manhattan, Lower Manhattan, Brooklyn Downtown, Williamsburg, Astoria Queens, South Bronx, Harlem, Upper East Side).
 
----
+### 4 — Load violation data
 
-## Phase 1: Data and map
+**Recommended — synthetic dataset (65 k records, 2022–2024):**
 
-### 1. Start the stack
-
-From the **repo root**:
-
-```powershell
-docker compose -f infra/docker-compose.yml up --build
+```bash
+docker compose -f infra/docker-compose.yml exec api python -m app.scripts.generate_synthetic_data
+# shortcut: make gen-data
 ```
 
-Wait until all services are healthy (db, then api, then web).
+**Alternative — real NYC open-data sample (~2 500 records):**
 
-### 2. Ingest sample data
-
-With the stack running, in another terminal from the repo root:
-
-**Option A — Make (if you have `make`):**
-
-```powershell
-make ingest
-```
-
-**Option B — Docker Compose directly (Windows/PowerShell):**
-
-```powershell
+```bash
 docker compose -f infra/docker-compose.yml exec api python -m app.scripts.ingest_nyc
+# shortcut: make ingest
 ```
 
-You should see log lines like: `Valid rows: 2500`, `Inserted batch: 500 rows`, `Ingest complete: 2500 rows`. Sample data lives in `data/nyc_violations_sample.csv` and is mounted into the API container at `/data`.
+### 5 — Open the app
 
-### 3. Open the map
-
-- In the browser go to **http://localhost:3000/map**, or use the “View violations map →” link on the home page.
-- The map loads violations from `GET /violations?limit=500` and shows markers in NYC. Pan and zoom to explore.
-
-### Phase 1 API
-
-- **GET /violations?limit=500** — Returns violation points (id, lat, lon, occurred_at, violation_type). Default limit 500, max 5000.
-
-No extra environment variables or API keys are required for Phase 1.
+Go to **http://localhost:3000** and use the nav bar: Map → Zones → Warnings → Patrol → Policy → Decision.
 
 ---
 
-## Phase 2.0: Stats endpoint and tests
+## Makefile Targets
 
-### GET /violations/stats
-
-Returns aggregate stats for violations, with optional filters (date range, hour, violation type).
-
-**Response:** `{ "total": int, "min_time": datetime|null, "max_time": datetime|null, "top_types": [ {"violation_type": str, "count": int}, ... ] }`
-
-**Query params (all optional):** `start`, `end` (ISO datetime), `hour_start`, `hour_end` (0–23), `violation_type` (exact string).
-
-**Example curl (stack running):**
-
-```powershell
-curl "http://localhost:8000/violations/stats"
-curl "http://localhost:8000/violations/stats?violation_type=No%20Parking"
-curl "http://localhost:8000/violations/stats?hour_start=22&hour_end=2"
-```
-
-### Run API tests
-
-Assumes the stack is up and sample data has been ingested (Phase 1). From **repo root**:
-
-```powershell
-docker compose -f infra/docker-compose.yml exec api pytest tests/test_stats.py -v
-```
-
-To run from a local shell (with `DATABASE_URL` set to your running Postgres, e.g. in `.env`):
-
-```powershell
-cd apps\api
-pip install -r requirements.txt
-pytest tests/test_stats.py -v
-```
-
-### Manual verification
-
-```powershell
-curl -s "http://localhost:8000/violations/stats" | ConvertFrom-Json
-curl -s "http://localhost:8000/violations/stats?hour_start=-1"
-# Expect 422 for invalid hour
+```bash
+make up        # docker compose up -d
+make build     # docker compose up --build -d
+make down      # docker compose down
+make ingest    # ingest real NYC sample CSV
+make gen-data  # generate + insert 65 k synthetic records
 ```
 
 ---
 
-## Phase 5.1: Zone system
+## API Endpoints
 
-Named areas (polygon zones) for decision-support. Run `init_zones` once after the stack is up:
+### Health
 
-```powershell
-docker compose -f infra/docker-compose.yml exec api python -m app.scripts.init_zones
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Liveness — `{"status":"ok"}` |
+| GET | `/db-check` | DB connectivity |
 
-### Zones API
+### Violations
 
-- **POST /api/zones** — Create a zone. Body: `{ "name": "Manhattan", "zone_type": "borough", "polygon": <GeoJSON Polygon> }`
-  - `polygon` must be a valid GeoJSON Polygon (type `"Polygon"`, closed ring, min 4 points, no self-intersections).
-  - Optional: `bbox`, `tags`.
-  - Returns created zone (id, name, zone_type, bbox, created_at).
-- **GET /api/zones** — List zones (pagination: `limit`, `offset`; filters: `zone_type`, `search`; `includeGeom=true` for geometry).
-- **GET /api/zones/{id}** — Get zone details including geometry.
-- **DELETE /api/zones/{id}** — Delete a zone.
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/violations` | Raw points (`limit`, `offset`, bbox, type filters) |
+| GET | `/violations/stats` | Aggregate stats (totals, top types, optional filters) |
 
-**Example: create zone**
+### Aggregations
 
-```powershell
-curl -X POST "http://localhost:8000/api/zones" -H "Content-Type: application/json" -d '{\"name\":\"Manhattan Box\",\"zone_type\":\"custom\",\"polygon\":{\"type\":\"Polygon\",\"coordinates\":[[[-74.02,40.70],[-73.95,40.70],[-73.95,40.80],[-74.02,40.80],[-74.02,40.70]]]}}'
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/aggregations/time/hour` | Counts by hour of day |
+| GET | `/aggregations/time/day` | Counts by date |
+| GET | `/aggregations/grid` | Spatial grid aggregation |
 
-**Run zone tests**
+### Predictions
 
-```powershell
-docker compose -f infra/docker-compose.yml exec api pytest tests/test_zones.py -v
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/predict/timeseries` | Historical time-series |
+| GET | `/predict/forecast` | Short-term violation forecast |
+| GET | `/predict/trends` | Zone trend signals |
+| GET | `/predict/hotspots/grid` | Grid-based hotspot detection |
+| GET | `/predict/risk` | Risk score per grid cell |
 
----
+### Zones
 
-## Phase 5.2: Zone Analytics
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/zones` | Create a zone (GeoJSON Polygon body) |
+| GET | `/api/zones` | List zones (`limit`, `offset`, `zone_type`, `search`) |
+| GET | `/api/zones/{id}` | Zone detail + geometry |
+| DELETE | `/api/zones/{id}` | Delete a zone |
+| GET | `/api/zones/rankings` | Rank by `risk` \| `trend` \| `volume` |
+| GET | `/api/zones/{id}/analytics` | Totals, time-series, top types, trend |
+| GET | `/api/zones/{id}/compare` | WoW / MoM delta comparison |
 
-Zone-level analytics: violations inside a zone, aggregated by time, top types, and a simple trend.
+### Anomalies & Warnings
 
-### GET /api/zones/{zone_id}/analytics
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/anomalies/heatmap` | Z-score anomaly heatmap points |
+| GET | `/api/warnings` | Warning cards for zones exceeding thresholds |
 
-Returns `total_count`, `time_series`, `top_violation_types` (top 5), and `summary` with `trend_direction` ("up" | "down" | "flat") and `percent_change`. Uses `ST_Intersects` for spatial filtering. Response cached 90s.
+### Decision Support
 
-**Query params**
-
-- `start_ts`, `end_ts` (optional) — time window (ISO)
-- `granularity` — `hour` | `day` (default `day`)
-
-**Example**
-
-```powershell
-curl "http://localhost:8000/api/zones/1/analytics"
-curl "http://localhost:8000/api/zones/1/analytics?granularity=hour"
-```
-
-**Run zone analytics tests**
-
-```powershell
-docker compose -f infra/docker-compose.yml exec api pytest tests/test_zones_analytics.py -v
-```
-
----
-
-## Phase 5.3: Zone Ranking
-
-Compare zones by risk, trend, or volume. Returns top N zones sorted by chosen metric.
-
-### GET /api/zones/rankings
-
-**Query params**
-
-- `start_ts`, `end_ts` (optional) — time window (ISO)
-- `granularity` — `hour` | `day` (default `day`)
-- `limit` — max zones to return (default 10)
-- `sort_by` — `risk` | `trend` | `volume` (default `risk`)
-
-**Scoring**
-
-- **risk**: normalized(total_count) + normalized(max(0, percent_change))
-- **trend**: percent_change
-- **volume**: total_count
-
-**Example**
-
-```powershell
-curl "http://localhost:8000/api/zones/rankings"
-curl "http://localhost:8000/api/zones/rankings?sort_by=volume&limit=5"
-```
-
-**Run zone rankings tests**
-
-```powershell
-docker compose -f infra/docker-compose.yml exec api pytest tests/test_zones_rankings.py -v
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/patrol/allocate` | Allocate N units across zones by strategy |
+| POST | `/api/policy/simulate` | Simulate an enforcement intervention |
+| POST | `/api/decision/now` | Unified action recommendation |
 
 ---
 
-## Phase 5.4: Zone Comparison (WoW/MoM)
+## Folder Structure
 
-Week-over-Week and Month-over-Month comparison for zones. Current vs previous period.
-
-### GET /api/zones/{zone_id}/compare
-
-**Query params**
-
-- `period` (required) — `wow` | `mom` (WoW = 7 days, MoM = 30 days)
-- `granularity` — `day` | `hour` (default `day`)
-- `start_ts`, `end_ts` (optional) — current window override; previous is same length immediately before
-
-**Response**
-
-- `current` / `previous`: window, total_count, time_series, top_violation_types
-- `delta`: delta_count, delta_percent, trend_label (up|down|flat), violation_type_shifts
-
-**Example**
-
-```powershell
-curl "http://localhost:8000/api/zones/1/compare?period=wow"
-curl "http://localhost:8000/api/zones/1/compare?period=mom&granularity=hour"
 ```
-
-**Run zone compare tests**
-
-```powershell
-docker compose -f infra/docker-compose.yml exec api pytest tests/test_zones_compare.py -v
-```
-
----
-
-## Phase 5.5: Historical Anomaly Heatmap
-
-Grid-based anomaly detection: cells where violation counts spike vs baseline (z-score). Returns heatmap-ready points (lat, lon, weight).
-
-### GET /api/anomalies/heatmap
-
-**Query params**
-
-- `start_ts`, `end_ts` (optional) — time window (ISO); else anchored to global MAX
-- `granularity` — `day` | `hour` (default `day`)
-- `bbox` (optional) — minLon,minLat,maxLon,maxLat
-- `method` — `zscore` (ewm not implemented)
-- `threshold` — z-score threshold (default 3.0)
-- `top_n` — max points (default 500)
-
-**Example**
-
-```powershell
-curl "http://localhost:8000/api/anomalies/heatmap"
-curl "http://localhost:8000/api/anomalies/heatmap?bbox=-74.1,40.6,-73.9,40.8&top_n=100"
-```
-
-**Run anomaly heatmap tests**
-
-```powershell
-docker compose -f infra/docker-compose.yml exec api pytest tests/test_anomalies_heatmap.py -v
-```
-
----
-
-## Phase 5.6: Early Warning Indicators
-
-On-demand warning cards for zones that need attention (trend up, WoW/MoM spike, anomaly cluster).
-
-### GET /api/warnings
-
-**Query params**
-
-- `scope` — `zones` (default) | `viewport` (viewport returns 422 for now)
-- `bbox` (optional, viewport only)
-- `start_ts`, `end_ts` (optional; else anchored to global MAX)
-- `limit` — max warnings (default 10)
-
-**Signals (zones scope)**
-
-- **trend_up**: zone trend_direction up, percent_change ≥ 10
-- **wow_spike**: week-over-week delta_percent ≥ 20
-- **mom_spike**: month-over-month delta_percent ≥ 30
-- **anomaly_cluster**: zone has ≥ 1 anomaly grid cell (z-score)
-
-**Example**
-
-```powershell
-curl "http://localhost:8000/api/warnings"
-curl "http://localhost:8000/api/warnings?scope=zones&limit=5"
-```
-
-**Run warnings tests**
-
-```powershell
-docker compose -f infra/docker-compose.yml exec api pytest tests/test_warnings.py -v
-```
-
----
-
-## Phase 5.7: Multi-zone compare panel (UI)
-
-The map page includes a **Compare zones** panel in the sidebar. You can select up to 5 zones (from `GET /api/zones`), view side-by-side analytics (total count, trend, WoW/MoM deltas), and click a zone card to zoom the map to that zone’s bbox. Selected zone IDs are persisted in the URL as `?zones=1,8,12` for sharing and refresh.
-
-**Viewport fetch behavior:** Map-triggered fetches (stats, hotspots, risk, forecast) use a 500ms debounce on bounds change; only `moveend`/`zoomend` events trigger bounds updates, and identical bbox updates are ignored. `AbortController` cancels stale requests when the viewport changes. Hotspots use a frontend micro-cache (3s TTL) and in-flight deduplication to reduce redundant requests. On HTTP 429, the Top 5 Hotspots card keeps the last successful data, shows a subtle "Temporarily rate-limited… retrying" note, and retries with exponential backoff (600/1200/2400ms + jitter, max 3 attempts). Dev logging: `localStorage.TRAFFICLYT_DEBUG_RATE=1`.
-
----
-
-## Phase 5.8: Patrol allocation recommendations
-
-Given N patrol units and a shift window, the API recommends which zones should get coverage and why.
-
-### POST /api/patrol/allocate
-
-**Request body**
-
-```json
-{
-  "units": 3,
-  "period": "current",
-  "shift_hours": 6,
-  "end_ts": null,
-  "strategy": "balanced",
-  "exclude_zone_ids": []
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| units | int | Number of patrol units (1..50), required |
-| period | string | `wow` \| `mom` \| `current` (default `current`) |
-| shift_hours | int | Shift window length in hours (default 6) |
-| end_ts | string | Optional; if missing, anchor to `MAX(occurred_at)` |
-| strategy | string | `balanced` \| `risk_max` \| `trend_focus` (default `balanced`) |
-| exclude_zone_ids | int[] | Optional zones to exclude from the plan |
-
-**Response**
-
-```json
-{
-  "plan": [
-    {
-      "zone": { "id": 1, "name": "Manhattan", "zone_type": "borough" },
-      "assigned_units": 1,
-      "priority_score": 0.83,
-      "reasons": [
-        { "signal": "high_volume", "value": 68 },
-        { "signal": "wow_spike", "value": 35.0 },
-        { "signal": "warning_high", "value": true }
-      ],
-      "recommendation_hint": "Investigate cause of spike; consider temporary coverage."
-    }
-  ],
-  "meta": { "request_id": null, "anchor_ts": "...", "response_cache": "miss" }
-}
-```
-
-**Behavior**
-
-- Uses zone rankings, analytics, WoW/MoM compare, and anomaly/warning signals (no HTTP calls; direct SQL).
-- Priority score depends on strategy:
-  - **risk_max**: normalized volume + anomaly presence + warning severity
-  - **trend_focus**: percent_change + WoW/MoM deltas
-  - **balanced**: volume + trend + anomaly + severity (weighted)
-- Allocation: assign 1 unit per zone in priority order until units exhausted; then add extra units to top zones (cap 2 per zone, 3 for risk_max).
-- Cached 75 seconds by (units, period, shift_hours, end_ts, strategy, exclude list, anchor_ts).
-
-**Example**
-
-```powershell
-curl -X POST "http://localhost:8000/api/patrol/allocate" -H "Content-Type: application/json" -d "{\"units\": 5, \"strategy\": \"risk_max\"}"
-```
-
-**Run patrol allocate tests**
-
-```powershell
-docker compose -f infra/docker-compose.yml exec api pytest tests/test_patrol_allocate.py -v
+Traffic-lyt/
+├── apps/
+│   ├── api/                        # FastAPI backend
+│   │   ├── app/
+│   │   │   ├── main.py             # App factory + router registration
+│   │   │   ├── db.py               # SQLAlchemy engine + connection helper
+│   │   │   ├── routers/            # One module per API group
+│   │   │   ├── scripts/
+│   │   │   │   ├── init_nyc_zones.py          # Insert 8 NYC zones
+│   │   │   │   ├── generate_synthetic_data.py # 65 k synthetic records
+│   │   │   │   └── ingest_nyc.py              # Real NYC CSV ingestion
+│   │   │   ├── predict/            # Forecasting, hotspots, trends, risk
+│   │   │   ├── policy/             # Baseline + simulation engine
+│   │   │   ├── queries/            # Reusable SQL builders
+│   │   │   └── utils/              # Rate limiter, cache, explainability
+│   │   ├── tests/
+│   │   ├── Dockerfile
+│   │   └── requirements.txt
+│   └── web/                        # Next.js 14 frontend
+│       └── app/
+│           ├── components/         # NavBar, CachePill, ZoneMultiSelect …
+│           ├── lib/
+│           │   ├── api.ts          # Typed fetch helpers for every endpoint
+│           │   └── csv.ts          # Client-side CSV export utility
+│           ├── map/                # /map  — Leaflet map + heatmap
+│           ├── zones/              # /zones — rankings + compare panel
+│           ├── warnings/           # /warnings — live warning cards
+│           ├── patrol/             # /patrol — allocation form + map
+│           ├── policy/             # /policy — intervention simulator
+│           ├── decision/           # /decision — unified action dashboard
+│           └── globals.css
+├── data/                           # nyc_violations_sample.csv
+├── infra/
+│   └── docker-compose.yml
+├── Makefile
+└── README.md
 ```
 
 ---
 
 ## Troubleshooting
 
-### Ports already in use (3000, 8000, 5432)
+**Port already in use (3000 / 8000 / 5432)**
+Find the process (`netstat -ano | findstr :8000` on Windows) and stop it, or change the host port mapping in `infra/docker-compose.yml`.
 
-- **Error like:** "port is already allocated" or "bind: address already in use".
-
-**Fix:**
-
-1. Stop the stack (see below).
-2. Find what is using the port (e.g. 8000):
-
-   ```powershell
-   netstat -ano | findstr :8000
-   ```
-
-3. Either stop that process or change the port in `infra/docker-compose.yml` (e.g. `"8001:8000"` for the API and set `NEXT_PUBLIC_API_BASE_URL=http://localhost:8001` in `.env` for the web).
-
-### API or web exits immediately
-
-- Check logs: `docker compose -f infra/docker-compose.yml logs api` (or `web` / `db`).
-- **API:** Ensure `DATABASE_URL` is set in the compose file (it is by default from env). If the DB is not ready, the API may fail; it waits for the db healthcheck.
-- **Web:** Ensure build completed; check `docker compose -f infra/docker-compose.yml logs web` for Node errors.
-
-### DB connection errors in /db-check
-
-- Confirm the `db` service is healthy: `docker compose -f infra/docker-compose.yml ps`. All should show "healthy" after a minute.
-- Ensure `.env` has the same `POSTGRES_*` values as in `infra/docker-compose.yml` (compose builds `DATABASE_URL` from those).
-
-### Docker Desktop not running
-
-- Start Docker Desktop and wait until it’s fully up, then run the compose command again.
-
-## Stop and remove volumes
-
-**Stop only (data kept):**
-
-```powershell
-docker compose -f infra/docker-compose.yml down
+**`No module named app.scripts.*` inside container**
+The Dockerfile copies source at build time. Rebuild the api image after adding new scripts:
+```bash
+docker compose -f infra/docker-compose.yml up --build -d api
 ```
 
-**Stop and remove DB volume (fresh DB next time):**
+**API returns empty results after fresh start**
+Zones and violation data must be loaded after every fresh database (see Quick Start steps 3–4).
 
-```powershell
-docker compose -f infra/docker-compose.yml down -v
+**Wipe everything and start fresh**
+```bash
+docker compose -f infra/docker-compose.yml down -v   # removes pgdata volume
+docker compose -f infra/docker-compose.yml up --build
+# then re-run init_nyc_zones + generate_synthetic_data
 ```
-
-Then start again with `docker compose -f infra/docker-compose.yml up --build`.
