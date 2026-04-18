@@ -115,6 +115,7 @@ function MapPageContent() {
   const [anchorMeta, setAnchorMeta] = useState<StatsResponse['meta'] | null>(null);
   const [cacheHit, setCacheHit] = useState(false);
   const [showLoadingSpinner, setShowLoadingSpinner] = useState(false);
+  const [zoom, setZoom] = useState<number>(11);
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
@@ -152,29 +153,24 @@ function MapPageContent() {
   const requestGenRef = useRef(0);
   const hotspotsRequestGenRef = useRef(0);
 
+  function getViolationsLimit(z: number): number {
+    if (z < 11) return 200;
+    if (z > 13) return 500;
+    return 350;
+  }
+
+  // Stats + aggregations: mount-only
   useEffect(() => {
     let cancelled = false;
-    async function fetchData() {
+    async function fetchOther() {
       try {
-        const [violationsRes, statsRes, hourRes, dayRes] = await Promise.all([
-          fetch(`${API_BASE}/violations?limit=500`),
+        const [statsRes, hourRes, dayRes] = await Promise.all([
           fetch(`${API_BASE}/violations/stats`),
           fetch(`${API_BASE}/aggregations/time/hour`),
           fetch(`${API_BASE}/aggregations/time/day`),
         ]);
-        const json: ViolationsResponse = await violationsRes.json();
-        if (!cancelled) {
-          if (!violationsRes.ok) {
-            setError(json.error || `HTTP ${violationsRes.status}`);
-          } else {
-            setData(json);
-            setError(json.error || null);
-          }
-        }
         const statsJson: StatsResponse = await statsRes.json();
-        if (!cancelled && typeof statsJson.total === 'number') {
-          setStatsTotal(statsJson.total);
-        }
+        if (!cancelled && typeof statsJson.total === 'number') setStatsTotal(statsJson.total);
         if (!cancelled && hourRes.ok) {
           const hours: HourBucket[] = await hourRes.json();
           setHourBuckets(Array.isArray(hours) ? hours : []);
@@ -184,16 +180,48 @@ function MapPageContent() {
           setDayBuckets(Array.isArray(days) ? days : []);
         }
       } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : String(e));
-        }
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
-    fetchData();
+    fetchOther();
     return () => { cancelled = true; };
   }, []);
+
+  // Violations: zoom-tier-aware (re-fetches only when tier changes)
+  const violationsLimitRef = useRef<number | null>(null);
+  const zoomEffectMountRef = useRef(false);
+  useEffect(() => {
+    if (!zoomEffectMountRef.current) {
+      zoomEffectMountRef.current = true;
+      violationsLimitRef.current = getViolationsLimit(zoom);
+      let cancelled = false;
+      fetch(`${API_BASE}/violations?limit=${violationsLimitRef.current}`)
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+        .then((json: ViolationsResponse) => {
+          if (cancelled) return;
+          setData(json);
+          setError(json.error || null);
+        })
+        .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
+      return () => { cancelled = true; };
+    }
+    const limit = getViolationsLimit(zoom);
+    if (violationsLimitRef.current === limit) return;
+    violationsLimitRef.current = limit;
+    let cancelled = false;
+    fetch(`${API_BASE}/violations?limit=${limit}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((json: ViolationsResponse) => {
+        if (cancelled) return;
+        setData(json);
+        setError(json.error || null);
+      })
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoom]);
 
   const prevBboxRef = useRef<string | null>(null);
 
@@ -505,6 +533,7 @@ function MapPageContent() {
               viewMode={viewMode}
               heatmapPoints={heatmapPoints}
               onBoundsChange={onBoundsChange}
+              onZoomChange={setZoom}
               flyToTarget={flyToTarget}
               onFlyToDone={() => setFlyToTarget(null)}
               fitBounds={fitBounds}

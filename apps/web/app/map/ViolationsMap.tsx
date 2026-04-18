@@ -36,6 +36,17 @@ export type MapBounds = { south: number; north: number; west: number; east: numb
 const NYC_CENTER: [number, number] = [40.7128, -74.006];
 const ZOOM = 11;
 
+function ZoomReporter({ onZoomChange }: { onZoomChange: (z: number) => void }) {
+  const map = useMap();
+  useEffect(() => {
+    const report = () => onZoomChange(map.getZoom());
+    report();
+    map.on('zoomend', report);
+    return () => { map.off('zoomend', report); };
+  }, [map, onZoomChange]);
+  return null;
+}
+
 function BoundsReporter({ onBoundsChange }: { onBoundsChange: (b: MapBounds) => void }) {
   const map = useMap();
   useEffect(() => {
@@ -130,6 +141,7 @@ type ViolationsMapProps = {
   viewMode: 'markers' | 'heatmap';
   heatmapPoints: HeatmapPoint[];
   onBoundsChange: (b: MapBounds) => void;
+  onZoomChange?: (zoom: number) => void;
   flyToTarget?: [number, number] | null;
   onFlyToDone?: () => void;
   fitBounds?: MapBounds | null;
@@ -141,6 +153,7 @@ export default function ViolationsMap({
   viewMode,
   heatmapPoints,
   onBoundsChange,
+  onZoomChange,
   flyToTarget = null,
   onFlyToDone = () => {},
   fitBounds = null,
@@ -158,6 +171,7 @@ export default function ViolationsMap({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <BoundsReporter onBoundsChange={onBoundsChange} />
+      {onZoomChange && <ZoomReporter onZoomChange={onZoomChange} />}
       <FlyToTarget target={flyToTarget ?? null} onDone={onFlyToDone} />
       <FitBounds bounds={fitBounds} onDone={onFitBoundsDone} />
       {viewMode === 'heatmap' && <HeatmapLayer points={heatmapPoints} />}
