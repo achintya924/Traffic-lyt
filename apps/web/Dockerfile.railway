@@ -1,12 +1,12 @@
 FROM node:20-slim AS deps
 WORKDIR /app
-COPY package.json package-lock.json* ./
+COPY apps/web/package.json apps/web/package-lock.json* ./
 RUN npm ci
 
 FROM node:20-slim AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY apps/web/ .
 # NEXT_PUBLIC_* vars are inlined at build time by Next.js.
 # Pass the Railway API service URL via --build-arg or Railway env var.
 ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
