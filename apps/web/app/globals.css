@@ -1635,3 +1635,45 @@ h1 {
   }
   .landing-stat-value  { font-size: 1.6rem; margin-bottom: 0; }
 }
+
+/* InfoTooltip */
+.info-tooltip-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid #475569;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.65rem;
+  font-style: italic;
+  font-weight: 700;
+  font-family: Georgia, serif;
+  cursor: pointer;
+  flex-shrink: 0;
+  line-height: 1;
+  padding: 0;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.info-tooltip-btn:hover {
+  border-color: #94a3b8;
+  color: #94a3b8;
+}
+
+.info-tooltip-popover {
+  position: fixed;
+  z-index: 9000;
+  max-width: 260px;
+  background: #0f172a;
+  color: #cbd5e1;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  padding: 0.55rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
+}

@@ -9,6 +9,7 @@ import {
   type ZoneRankingsSortBy,
 } from '@/app/lib/api';
 import ZoneComparePanel from '@/app/components/ZoneComparePanel';
+import InfoTooltip from '@/app/components/InfoTooltip';
 import CachePill from '@/app/components/CachePill';
 import { downloadCsv, csvDate } from '@/app/lib/csv';
 
@@ -137,7 +138,10 @@ export default function ZonesPage() {
   return (
     <main className="panel-page">
       <header className="panel-header">
-        <h1>Zones</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <h1 style={{ margin: 0 }}>Zones</h1>
+          <InfoTooltip text="NYC neighbourhood zones. Browse all zones, view risk rankings, inspect time-series analytics, and compare week-over-week trends." />
+        </div>
         <p className="panel-subtitle">
           Browse zones, inspect rankings, and compare analytics side by side.
         </p>
@@ -146,7 +150,10 @@ export default function ZonesPage() {
       <div className="panel-grid">
         <section className="panel-card">
           <div className="panel-card-header">
-            <div className="panel-card-title">Rankings</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <div className="panel-card-title">Rankings</div>
+              <InfoTooltip text="Zones sorted by the selected metric. Risk = composite score (volume + trend + anomaly). Trend = week-over-week acceleration. Volume = raw violation count." />
+            </div>
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
               {rankings.length > 0 && (
                 <button type="button" className="panel-btn" onClick={handleExportRankings}>
@@ -225,7 +232,10 @@ export default function ZonesPage() {
 
         <section className="panel-card">
           <div className="panel-card-header">
-            <div className="panel-card-title">All zones</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <div className="panel-card-title">All zones</div>
+              <InfoTooltip text="Full list of configured NYC zones. Click any row to open its detailed analytics panel." />
+            </div>
             <span className="panel-muted-inline">
               {zonesLoading ? '…' : `${filteredZones.length} / ${zones.length}`}
             </span>
@@ -290,7 +300,10 @@ export default function ZonesPage() {
 
         <section className="panel-card panel-card-wide">
           <div className="panel-card-header">
-            <div className="panel-card-title">Compare</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <div className="panel-card-title">Compare</div>
+              <InfoTooltip text="Select two or more zones to compare totals, trend direction, and week-over-week / month-over-month percentage changes side by side." />
+            </div>
           </div>
           <p className="panel-muted" style={{ marginBottom: '0.5rem' }}>
             Select two or more zones to view totals, trend, and WoW/MoM deltas side by side.

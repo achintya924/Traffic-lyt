@@ -9,6 +9,7 @@ import {
 } from '@/app/lib/api';
 import ZoneMultiSelect from '@/app/components/ZoneMultiSelect';
 import CachePill from '@/app/components/CachePill';
+import InfoTooltip from '@/app/components/InfoTooltip';
 // no csv import needed — decision page uses window.print() only
 
 const SEVERITY_COLOR: Record<string, string> = {
@@ -195,7 +196,10 @@ export default function DecisionPage() {
   return (
     <main className="panel-page">
       <header className="panel-header">
-        <h1>Decision Dashboard</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <h1 style={{ margin: 0 }}>Decision Dashboard</h1>
+          <InfoTooltip text="Synthesises all signals into a single action recommendation. Select zones and a horizon, click Get Recommendation, and receive a verdict with full supporting evidence — warnings, patrol plan, forecast, and confidence score." />
+        </div>
         <p className="panel-subtitle">What should I do right now?</p>
       </header>
 
@@ -230,7 +234,10 @@ export default function DecisionPage() {
 
       <section className="panel-card no-print" style={{ marginBottom: '1rem' }}>
         <div className="panel-card-header">
-          <div className="panel-card-title">Configure</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <div className="panel-card-title">Configure</div>
+            <InfoTooltip text="Select up to 10 zones to analyse and pick a horizon. 24 h gives short-term enforcement guidance; 30 days gives strategic planning context." />
+          </div>
           {autoRefreshActive && (
             <span className="panel-muted-inline">auto-refreshing every 120s</span>
           )}
@@ -325,7 +332,10 @@ export default function DecisionPage() {
             {/* Confidence */}
             <section className="panel-card">
               <div className="panel-card-header">
-                <div className="panel-card-title">Confidence</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <div className="panel-card-title">Confidence</div>
+                  <InfoTooltip text="How reliable is this forecast? High (≥0.75) means strong historical signal with low variance. Low (<0.45) means sparse data or high volatility — treat the recommendation as directional, not precise." />
+                </div>
               </div>
               {result.confidence ? (
                 <div className="decision-confidence">
@@ -367,7 +377,10 @@ export default function DecisionPage() {
             {/* Active Warnings */}
             <section className="panel-card">
               <div className="panel-card-header">
-                <div className="panel-card-title">Active Warnings</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <div className="panel-card-title">Active Warnings</div>
+                  <InfoTooltip text="Early-warning signals for the selected zones at the time of this recommendation. Severity: red = high (immediate action), amber = medium, blue = low (monitor)." />
+                </div>
                 <span className="panel-muted-inline">{warnings.length}</span>
               </div>
               {warnings.length === 0 ? (
@@ -412,7 +425,10 @@ export default function DecisionPage() {
             {/* Hotspots */}
             <section className="panel-card">
               <div className="panel-card-header">
-                <div className="panel-card-title">Top Hotspots</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <div className="panel-card-title">Top Hotspots</div>
+                  <InfoTooltip text="Zones with the highest current violation concentration within the selected set. Based on the most recent hotspot grid scan." />
+                </div>
                 <span className="panel-muted-inline">{hotspots.length}</span>
               </div>
               {hotspots.length === 0 ? (
@@ -443,7 +459,10 @@ export default function DecisionPage() {
             {/* Patrol */}
             <section className="panel-card">
               <div className="panel-card-header">
-                <div className="panel-card-title">Patrol Recommendation</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <div className="panel-card-title">Patrol Recommendation</div>
+                  <InfoTooltip text="Pre-computed patrol plan for the selected zones. Each row shows assigned units and the reasons that drove that zone's priority score." />
+                </div>
                 <span className="panel-muted-inline">
                   {patrol?.units ?? 0} unit{(patrol?.units ?? 0) === 1 ? '' : 's'}
                 </span>
@@ -481,7 +500,10 @@ export default function DecisionPage() {
           {/* Forecast */}
           <section className="panel-card" style={{ marginBottom: '1rem' }}>
             <div className="panel-card-header">
-              <div className="panel-card-title">Forecast Summary</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <div className="panel-card-title">Forecast Summary</div>
+                <InfoTooltip text="Expected violation count for the chosen horizon, broken down by zone. Generated by the time-series model using recent historical patterns and current trend signals." />
+              </div>
               <span className="panel-muted-inline">
                 {forecast?.horizon} · ~{Math.round(forecast?.overall_total ?? 0)} total
               </span>
@@ -510,7 +532,10 @@ export default function DecisionPage() {
                 onClick={() => setExplainOpen((o) => !o)}
                 aria-expanded={explainOpen}
               >
-                <span>Why this recommendation?</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  Why this recommendation?
+                  <InfoTooltip text="Full audit trail of signals, weights, and thresholds used to produce the verdict. Every factor — warnings, patrol scoring, forecast, confidence — is listed with a plain-English explanation." />
+                </span>
                 <span className="decision-explain-caret">{explainOpen ? '▲' : '▼'}</span>
               </button>
               {explainOpen && (

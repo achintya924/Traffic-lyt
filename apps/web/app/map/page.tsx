@@ -18,6 +18,7 @@ import {
   type StatsResponse,
 } from '@/app/lib/api';
 import AnchorInfo from '@/app/components/AnchorInfo';
+import InfoTooltip from '@/app/components/InfoTooltip';
 import CachePill from '@/app/components/CachePill';
 import RiskLegend from '@/app/components/RiskLegend';
 import RiskPanel, { type ForecastMode } from '@/app/components/RiskPanel';
@@ -452,7 +453,10 @@ function MapPageContent() {
   return (
     <main className="map-page">
       <header style={{ padding: '0.75rem 1rem', background: '#1e293b', flexShrink: 0 }}>
-        <h1 style={{ fontSize: '1.25rem' }}>Violations map</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <h1 style={{ fontSize: '1.25rem', margin: 0 }}>Violations map</h1>
+          <InfoTooltip text="Live NYC traffic violation map. Markers show individual incidents; heatmap shows spatial density. Zoom in for more detail — data resolution increases automatically." />
+        </div>
         <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginTop: '0.25rem' }}>
           Total violations (this view): {statsTotal !== null ? statsTotal : '…'}
           <CachePill hit={cacheHit} />
@@ -541,8 +545,11 @@ function MapPageContent() {
             />
           </div>
           <div style={{ background: '#1e293b', borderRadius: 8, padding: '0.75rem 1rem' }}>
-            <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '0.25rem' }}>
-              Top 5 Hotspots
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.25rem' }}>
+              <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#e2e8f0' }}>
+                Top 5 Hotspots
+              </div>
+              <InfoTooltip text="Grid cells with the highest violation density in the current map view. Score combines raw count and spatial concentration. Click 'Go to' to fly the map to that cell." />
             </div>
             {hotspotsLoading && showLoadingSpinner && (
               <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: 0 }}>Loading…</p>

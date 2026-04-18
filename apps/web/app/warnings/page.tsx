@@ -9,6 +9,7 @@ import {
   type WarningType,
 } from '@/app/lib/api';
 import CachePill from '@/app/components/CachePill';
+import InfoTooltip from '@/app/components/InfoTooltip';
 
 const REFRESH_MS = 60_000;
 
@@ -142,6 +143,7 @@ export default function WarningsPage() {
       <header className="panel-header">
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', flexWrap: 'wrap' }}>
           <h1>Warnings</h1>
+          <InfoTooltip text="Automatic signals for zones exceeding normal violation thresholds. Four signal types: Trend up (sustained daily rise), WoW spike (week-over-week jump), MoM spike (month-over-month jump), Anomaly cluster (spatially correlated outliers)." />
           <CachePill hit={cacheHit} />
           <span className="panel-muted-inline">
             Auto-refreshes every 60s

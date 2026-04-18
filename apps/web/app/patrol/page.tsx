@@ -12,6 +12,7 @@ import {
   type WarningsExplainEntry,
 } from '@/app/lib/api';
 import ZoneMultiSelect from '@/app/components/ZoneMultiSelect';
+import InfoTooltip from '@/app/components/InfoTooltip';
 import CachePill from '@/app/components/CachePill';
 import { downloadCsv, csvDate } from '@/app/lib/csv';
 import type { PatrolMapMarker } from '@/app/patrol/PatrolMap';
@@ -168,7 +169,10 @@ export default function PatrolPage() {
   return (
     <main className="panel-page">
       <header className="panel-header">
-        <h1>Patrol Allocation</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <h1 style={{ margin: 0 }}>Patrol Allocation</h1>
+          <InfoTooltip text="Deterministic unit assignment across zones. The engine scores each zone on volume, trend, week-over-week delta, and anomaly signals, then distributes your available units proportionally." />
+        </div>
         <p className="panel-subtitle">
           Allocate patrol units across zones using a deterministic scoring strategy.
         </p>
@@ -177,7 +181,10 @@ export default function PatrolPage() {
       <div className="panel-grid">
         <section className="panel-card">
           <div className="panel-card-header">
-            <div className="panel-card-title">Configure</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <div className="panel-card-title">Configure</div>
+              <InfoTooltip text="Set the number of patrol units to deploy, pick a distribution strategy, and choose which zones to consider. Balanced spreads units evenly by score; Risk-first concentrates them on the top zone." />
+            </div>
           </div>
           <form onSubmit={handleSubmit} className="form-stack">
             <label className="form-label">
@@ -271,7 +278,10 @@ export default function PatrolPage() {
 
         <section className="panel-card">
           <div className="panel-card-header">
-            <div className="panel-card-title">Plan</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <div className="panel-card-title">Plan</div>
+              <InfoTooltip text="Each row shows a zone, its priority score (0–1), the number of units assigned, and reason chips explaining why it ranked where it did." />
+            </div>
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
               {result && result.plan.length > 0 && (
                 <button type="button" className="panel-btn" onClick={handleExportPlan}>
@@ -365,7 +375,10 @@ export default function PatrolPage() {
       {explainEntries.length > 0 && (
         <section className="panel-card panel-card-wide" style={{ marginTop: '1rem' }}>
           <div className="panel-card-header">
-            <div className="panel-card-title">Explain</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <div className="panel-card-title">Explain</div>
+              <InfoTooltip text="Full audit trail of signals and weights used to compute each zone's priority score. Each entry has a code (the signal type) and a plain-English message." />
+            </div>
           </div>
           <ul className="explain-list">
             {explainEntries.map((e, i) => (

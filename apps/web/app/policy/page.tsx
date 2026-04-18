@@ -12,6 +12,7 @@ import {
 } from '@/app/lib/api';
 import ZoneMultiSelect from '@/app/components/ZoneMultiSelect';
 import CachePill from '@/app/components/CachePill';
+import InfoTooltip from '@/app/components/InfoTooltip';
 import { downloadCsv, csvDate } from '@/app/lib/csv';
 
 const MAX_INTERVENTIONS = 5;
@@ -229,7 +230,10 @@ export default function PolicyPage() {
   return (
     <main className="panel-page">
       <header className="panel-header">
-        <h1>Policy Simulator</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <h1 style={{ margin: 0 }}>Policy Simulator</h1>
+          <InfoTooltip text="Model 'what if?' enforcement scenarios before committing resources. Stack multiple interventions, set a forecast horizon, and see how expected violations change vs. the unmodified baseline." />
+        </div>
         <p className="panel-subtitle">
           Apply interventions to the forecast baseline and compare expected violations.
         </p>
@@ -238,7 +242,10 @@ export default function PolicyPage() {
       <div className="panel-grid">
         <section className="panel-card">
           <div className="panel-card-header">
-            <div className="panel-card-title">Configure</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <div className="panel-card-title">Configure</div>
+              <InfoTooltip text="Choose target zones, a forecast horizon (24 h or 30 days), and one or more interventions. Enforcement intensity scales patrol effectiveness; Patrol units sets headcount; Peak-hour reduction targets rush-hour windows." />
+            </div>
           </div>
           <form onSubmit={handleSubmit} className="form-stack">
             {zonesLoading ? (
@@ -336,7 +343,10 @@ export default function PolicyPage() {
 
         <section className="panel-card">
           <div className="panel-card-header">
-            <div className="panel-card-title">Result</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <div className="panel-card-title">Result</div>
+              <InfoTooltip text="Baseline = forecast violations with no intervention. Simulated = projected outcome with your interventions applied. Delta = absolute and percentage reduction. Confidence badge indicates forecast reliability." />
+            </div>
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
               {result && (
                 <button type="button" className="panel-btn" onClick={handleExportResult}>
@@ -478,7 +488,10 @@ export default function PolicyPage() {
       {result && result.explain && result.explain.length > 0 && (
         <section className="panel-card panel-card-wide" style={{ marginTop: '1rem' }}>
           <div className="panel-card-header">
-            <div className="panel-card-title">Explain</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <div className="panel-card-title">Explain</div>
+              <InfoTooltip text="Audit trail of every assumption and adjustment applied during the simulation. Each entry shows the signal code and a plain-English explanation of how it affected the forecast." />
+            </div>
           </div>
           <ul className="explain-list">
             {result.explain.map((e, i) => (
