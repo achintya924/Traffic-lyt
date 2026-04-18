@@ -18,7 +18,12 @@ export default function NavBar() {
   const [menuOpen, setMenuOpen] = useState(false);
   return (
     <nav className="site-nav" aria-label="Primary">
-      <Link href="/" className="site-nav-brand" onClick={() => setMenuOpen(false)}>
+      <Link
+        href="/"
+        className={`site-nav-brand${pathname === '/' ? ' site-nav-brand-active' : ''}`}
+        aria-current={pathname === '/' ? 'page' : undefined}
+        onClick={() => setMenuOpen(false)}
+      >
         Traffic-lyt
       </Link>
       <button
