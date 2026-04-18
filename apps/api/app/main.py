@@ -34,12 +34,19 @@ app.include_router(decision.router)
 _cors_origins_raw = os.getenv(
     "CORS_ORIGINS",
     "http://localhost:3000,http://127.0.0.1:3000",
-)
-_cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+).strip()
+# CORS_ORIGINS=* allows all origins (useful for initial Railway testing).
+# Starlette prohibits allow_credentials=True with allow_origins=["*"].
+if _cors_origins_raw == "*":
+    _cors_origins = ["*"]
+    _cors_credentials = False
+else:
+    _cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+    _cors_credentials = True
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_credentials=True,
+    allow_credentials=_cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
