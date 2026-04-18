@@ -9,20 +9,23 @@
 ![PostGIS](https://img.shields.io/badge/PostGIS-3.4-4479A1?style=flat-square)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)
 
+> **Demo walkthrough:** see [DEMO.md](DEMO.md) for a 5-minute guided tour of every feature.
+
 ---
 
 ## Features
 
 | # | Feature | Description |
 |---|---------|-------------|
-| 1 | **Interactive Map** | Live violation markers, animated heatmap overlay, hotspot grid, forecast risk layer |
-| 2 | **Zone Analytics** | Per-neighborhood totals, time-series, top violation types, trend direction |
-| 3 | **Zone Rankings** | Sort zones by risk score, trend velocity, or raw volume |
-| 4 | **Early Warnings** | Automatic warning cards for trend spikes, WoW/MoM anomalies, and anomaly clusters |
-| 5 | **Patrol Allocation** | Deterministic unit-assignment recommendations across zones with reason chips |
-| 6 | **Policy Simulator** | Model enforcement interventions (intensity, patrol units, peak-hour reduction) against a forecast baseline |
-| 7 | **Decision Dashboard** | Unified "what should I do right now?" recommendation — verdict, confidence, hotspots, patrol plan, forecast |
-| 8 | **Export & Reporting** | CSV export on Zones, Patrol, and Policy pages; printable Decision report via browser print dialog |
+| 1 | **Landing Page** | Live stat cards (violations, zones, warnings), feature grid with direct links, production-grade metadata and favicon |
+| 2 | **Interactive Map** | Live violation markers, animated heatmap overlay, hotspot grid, forecast risk layer; zoom-adaptive data loading (200 / 350 / 500 points) |
+| 3 | **Zone Analytics** | Per-neighbourhood totals, time-series, top violation types, trend direction |
+| 4 | **Zone Rankings** | Sort zones by risk score, trend velocity, or raw volume |
+| 5 | **Early Warnings** | Automatic warning cards for trend spikes, WoW/MoM anomalies, and anomaly clusters; auto-refresh every 60 s |
+| 6 | **Patrol Allocation** | Deterministic unit-assignment recommendations across zones with explainable reason chips and map overlay |
+| 7 | **Policy Simulator** | Model enforcement interventions (intensity, patrol units, peak-hour reduction) against a forecast baseline |
+| 8 | **Decision Dashboard** | Unified "what should I do right now?" recommendation — verdict, confidence, warnings, patrol plan, forecast, printable report |
+| 9 | **Export & Reporting** | CSV export on Zones, Patrol, and Policy pages; printable Decision report via browser print dialog |
 
 ---
 
@@ -32,10 +35,60 @@
 
 | Page | Screenshot |
 |------|-----------|
+| Landing | ![Landing page — live stat cards and feature grid](docs/screenshots/landing.png) |
 | Map | ![Map page — violation markers and heatmap overlay](docs/screenshots/map.png) |
 | Decision Dashboard | ![Decision Dashboard — verdict card and patrol recommendation](docs/screenshots/decision.png) |
 | Patrol Allocation | ![Patrol Allocation — priority-ranked zone list](docs/screenshots/patrol.png) |
 | Policy Simulator | ![Policy Simulator — baseline vs simulated comparison bars](docs/screenshots/policy.png) |
+
+---
+
+## Architecture
+
+```
+Browser (localhost:3000)
+        │
+        │  React — client-side fetch (REST/JSON)
+        ▼
+Next.js 14  (App Router · TypeScript · Leaflet)
+        │
+        │  HTTP REST (localhost:8000)
+        ▼
+FastAPI 0.115  (Python · SQLAlchemy 2 · scikit-learn · numpy)
+        │
+        │  SQLAlchemy connection pool
+        ▼
+PostgreSQL 16 + PostGIS 3.4
+```
+
+All three services run as Docker Compose services on a single host. The frontend calls the API directly from the browser (CORS configured for `localhost:3000`). There is no server-side rendering of data — every page is a `'use client'` component that fetches from `NEXT_PUBLIC_API_BASE_URL`.
+
+---
+
+## Data
+
+### Synthetic dataset (recommended for demos)
+
+| Property | Value |
+|----------|-------|
+| Records | 65,000 violations |
+| Date range | 2022-01-01 – 2024-12-31 |
+| Violation types | Speed camera, Red light, No parking, Bus lane, Crosswalk block, Expired meter |
+| Spatial hotspots | 5 clusters — Midtown Manhattan (30 %), Lower Manhattan (21 %), Brooklyn (17 %), Queens (10 %), Bronx (7 %); remaining 15 % random |
+| Temporal patterns | Weekday/weekend multipliers, hourly weights (peak at 08:00/17:00), monthly seasonality, per-ISO-week variance |
+| NYC zones | 8 neighbourhood rectangles (Midtown, Lower Manhattan, Brooklyn Downtown, Williamsburg, Astoria Queens, South Bronx, Harlem, Upper East Side) |
+
+Generate with:
+```bash
+docker compose -f infra/docker-compose.yml exec api python -m app.scripts.generate_synthetic_data
+```
+
+### Real NYC open-data sample (~2,500 records)
+
+A sampled CSV from the NYC Open Data portal is bundled at `data/nyc_violations_sample.csv`. Ingest with:
+```bash
+docker compose -f infra/docker-compose.yml exec api python -m app.scripts.ingest_nyc
+```
 
 ---
 
@@ -91,7 +144,9 @@ First build pulls PostGIS and installs all deps (~2 min). Subsequent starts are 
 docker compose -f infra/docker-compose.yml exec api python -m app.scripts.init_nyc_zones
 ```
 
-Inserts 8 realistic NYC neighborhood zones (Midtown Manhattan, Lower Manhattan, Brooklyn Downtown, Williamsburg, Astoria Queens, South Bronx, Harlem, Upper East Side).
+Inserts 8 realistic NYC neighbourhood zones (Midtown Manhattan, Lower Manhattan, Brooklyn Downtown, Williamsburg, Astoria Queens, South Bronx, Harlem, Upper East Side).
+
+> **Note:** Run this _after_ `generate_synthetic_data` or `ingest_nyc` — those scripts create the violations table with its spatial indices. `init_nyc_zones` only writes zone rows and requires the table to already exist.
 
 ### 4 — Load violation data
 
@@ -102,7 +157,7 @@ docker compose -f infra/docker-compose.yml exec api python -m app.scripts.genera
 # shortcut: make gen-data
 ```
 
-**Alternative — real NYC open-data sample (~2 500 records):**
+**Alternative — real NYC open-data sample (~2,500 records):**
 
 ```bash
 docker compose -f infra/docker-compose.yml exec api python -m app.scripts.ingest_nyc
@@ -111,7 +166,9 @@ docker compose -f infra/docker-compose.yml exec api python -m app.scripts.ingest
 
 ### 5 — Open the app
 
-Go to **http://localhost:3000** and use the nav bar: Map → Zones → Warnings → Patrol → Policy → Decision.
+Go to **http://localhost:3000** and follow the nav bar: Map → Zones → Warnings → Patrol → Policy → Decision.
+
+For a guided tour, see [DEMO.md](DEMO.md).
 
 ---
 
@@ -213,7 +270,7 @@ Traffic-lyt/
 │   │   └── requirements.txt
 │   └── web/                        # Next.js 14 frontend
 │       └── app/
-│           ├── components/         # NavBar, CachePill, ZoneMultiSelect …
+│           ├── components/         # NavBar, NavigationProgress, CachePill …
 │           ├── lib/
 │           │   ├── api.ts          # Typed fetch helpers for every endpoint
 │           │   └── csv.ts          # Client-side CSV export utility
@@ -223,13 +280,46 @@ Traffic-lyt/
 │           ├── patrol/             # /patrol — allocation form + map
 │           ├── policy/             # /policy — intervention simulator
 │           ├── decision/           # /decision — unified action dashboard
-│           └── globals.css
+│           ├── globals.css
+│           └── page.tsx            # Landing page
 ├── data/                           # nyc_violations_sample.csv
 ├── infra/
 │   └── docker-compose.yml
+├── DEMO.md                         # 5-minute guided demo walkthrough
 ├── Makefile
 └── README.md
 ```
+
+---
+
+## Phase History
+
+| Tag | Description |
+|-----|-------------|
+| `phase-0` | Project scaffold — Docker Compose, FastAPI skeleton, Next.js shell |
+| `phase-1` | Violations table, PostGIS, CSV ingestion (`ingest_nyc.py`) |
+| `phase-2.x` | Spatial aggregations, heatmap grid, time-series, violation markers on Leaflet map |
+| `phase-3.x` | Frontend foundations — map page, stats panel, busiest hour/day, bbox filtering |
+| `Phase-4.x` | API hardening — rate limiting, in-memory response cache, timing middleware, request IDs |
+| `phase-5.1` | Zones CRUD + spatial queries |
+| `phase-5.2` | Zone rankings (risk / trend / volume) |
+| `phase-5.3` | Zone analytics (time-series, top types, trend) |
+| `phase-5.4` | Zone WoW/MoM comparison |
+| `phase-5.5` | Anomaly heatmap (z-score grid) |
+| `phase-5.6` | Early warning indicators (signals, severity, caching) |
+| `phase-5.7` | Multi-zone compare panel + frontend rate-limit stabilisation |
+| `phase-5.8` | Patrol allocation engine |
+| `phase-5.9x` | Policy simulation engine (baseline, normalization, caching) |
+| `phase-5.10` | Forecast confidence scoring |
+| `phase-5.11` | Unified decision endpoint (`POST /api/decision/now`) |
+| `phase-5.12` | Explainability layer (shared explain helpers across all endpoints) |
+| `phase-6.2` | Patrol Allocation + Policy Simulator UI |
+| `phase-6.3` | Decision Dashboard UI |
+| `phase-7.1` | UX hardening — loading skeletons, error cards, empty states, btn spinners |
+| `phase-7.2` | Export + Reporting — CSV download, printable Decision report |
+| `phase-7.3` | Walkthrough banner, synthetic data script, realistic NYC zones, README |
+| `phase-8.1` | Landing page — hero, live stat cards, feature grid, CTA |
+| `phase-8.2` | Performance + SEO — page metadata, favicon, route progress bar, zoom-adaptive map |
 
 ---
 
@@ -245,11 +335,14 @@ docker compose -f infra/docker-compose.yml up --build -d api
 ```
 
 **API returns empty results after fresh start**
-Zones and violation data must be loaded after every fresh database (see Quick Start steps 3–4).
+Zones and violation data must be loaded after every fresh database (see Quick Start steps 3–4). Run `generate_synthetic_data` first (it creates the violations table and indices), then `init_nyc_zones`.
+
+**Patrol / Policy / Decision returns "Failed to fetch"**
+The API container may be down. Check `docker compose -f infra/docker-compose.yml ps` and `logs api --tail=30`. If the container is healthy but the query is slow, run `ANALYZE violations;` inside the db container to refresh query-planner statistics.
 
 **Wipe everything and start fresh**
 ```bash
 docker compose -f infra/docker-compose.yml down -v   # removes pgdata volume
 docker compose -f infra/docker-compose.yml up --build
-# then re-run init_nyc_zones + generate_synthetic_data
+# then re-run generate_synthetic_data + init_nyc_zones
 ```
