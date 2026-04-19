@@ -15,10 +15,12 @@ Properties:
 """
 import logging
 import os
+import time
 from datetime import date, datetime, timedelta
 
 import numpy as np
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -27,10 +29,12 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-N_RECORDS      = 65_000
-BATCH_SIZE     = 1_000
-PROGRESS_EVERY = 10_000
+N_RECORDS      = int(os.getenv("COUNT", "65000"))
+BATCH_SIZE     = 5_000
+PROGRESS_EVERY = 5_000
 RNG_SEED       = 42
+BATCH_RETRY_MAX   = 3
+BATCH_SLEEP_SEC   = 0.5
 
 DATE_START = date(2022, 1, 1)
 DATE_END   = date(2024, 12, 31)
@@ -224,6 +228,31 @@ def _ensure_table(engine) -> None:
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _insert_batch(engine, batch: list[dict]) -> None:
+    """Insert one batch, retrying up to BATCH_RETRY_MAX times on OperationalError."""
+    for attempt in range(1, BATCH_RETRY_MAX + 1):
+        try:
+            with engine.connect() as conn:
+                for r in batch:
+                    conn.execute(_INSERT_SQL, r)
+                conn.commit()
+            return
+        except OperationalError as exc:
+            if attempt == BATCH_RETRY_MAX:
+                logger.error(
+                    "Batch failed after %d attempts: %s", BATCH_RETRY_MAX, exc
+                )
+                raise
+            wait = attempt * 5
+            logger.warning(
+                "OperationalError on attempt %d/%d — reconnecting in %ds: %s",
+                attempt, BATCH_RETRY_MAX, wait, exc,
+            )
+            time.sleep(wait)
+            # Dispose the pool so the next connect() gets a fresh connection.
+            engine.dispose()
+
+
 def main() -> None:
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
@@ -235,31 +264,52 @@ def main() -> None:
     logger.info("Ensuring violations table exists…")
     _ensure_table(engine)
 
+    # ── Resume support ───────────────────────────────────────────────────────
+    # Check how many rows are already present so a partial run can continue
+    # from where it left off instead of truncating and starting over.
+    with engine.connect() as conn:
+        existing = conn.execute(text("SELECT COUNT(*) FROM violations")).scalar() or 0
+
     rng     = np.random.default_rng(RNG_SEED)
     records = generate_records(rng)
 
-    logger.info("Truncating violations table…")
-    with engine.connect() as conn:
-        conn.execute(text("TRUNCATE TABLE violations RESTART IDENTITY"))
-        conn.commit()
+    if existing >= len(records):
+        logger.info(
+            "Database already contains %d records (target %d). Nothing to do.",
+            existing, len(records),
+        )
+        return
+
+    if existing > 0:
+        logger.info(
+            "Resuming from record %d (skipping %d already-inserted rows).",
+            existing, existing,
+        )
+        records = records[existing:]
+    else:
+        logger.info("Fresh run — truncating violations table…")
+        with engine.connect() as conn:
+            conn.execute(text("TRUNCATE TABLE violations RESTART IDENTITY"))
+            conn.commit()
 
     logger.info(
-        "Inserting %d records in batches of %d…",
-        len(records), BATCH_SIZE,
+        "Inserting %d records in batches of %d (sleep %ds between batches)…",
+        len(records), BATCH_SIZE, BATCH_SLEEP_SEC,
     )
-    inserted = 0
-    with engine.connect() as conn:
-        for batch_start in range(0, len(records), BATCH_SIZE):
-            batch = records[batch_start : batch_start + BATCH_SIZE]
-            for r in batch:
-                conn.execute(_INSERT_SQL, r)
-            conn.commit()
-            inserted += len(batch)
-            if inserted % PROGRESS_EVERY == 0 or inserted == len(records):
-                logger.info(
-                    "Progress: %d / %d records inserted (%.1f%%)",
-                    inserted, len(records), 100.0 * inserted / len(records),
-                )
+    inserted = existing
+    total    = existing + len(records)
+
+    for batch_start in range(0, len(records), BATCH_SIZE):
+        batch = records[batch_start : batch_start + BATCH_SIZE]
+        _insert_batch(engine, batch)
+        inserted += len(batch)
+        if inserted % PROGRESS_EVERY == 0 or inserted == total:
+            logger.info(
+                "Progress: %d / %d records inserted (%.1f%%)",
+                inserted, total, 100.0 * inserted / total,
+            )
+        if batch_start + BATCH_SIZE < len(records):
+            time.sleep(BATCH_SLEEP_SEC)
 
     logger.info("Done. %d synthetic violation records in database.", inserted)
 
