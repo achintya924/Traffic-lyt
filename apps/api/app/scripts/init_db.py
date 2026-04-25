@@ -42,7 +42,8 @@ _STEPS = [
             violation_type TEXT,
             geom           GEOMETRY(Point, 4326) NOT NULL,
             raw_lat        DOUBLE PRECISION,
-            raw_lon        DOUBLE PRECISION
+            raw_lon        DOUBLE PRECISION,
+            city           VARCHAR(50) DEFAULT 'nyc'
         )
         """,
     ),
@@ -68,9 +69,14 @@ _STEPS = [
             bbox_maxy  DOUBLE PRECISION,
             tags       JSONB,
             created_at TIMESTAMP DEFAULT NOW() NOT NULL,
-            updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+            updated_at TIMESTAMP DEFAULT NOW() NOT NULL,
+            city       VARCHAR(50) DEFAULT 'nyc'
         )
         """,
+    ),
+    (
+        "Create violations city index",
+        "CREATE INDEX IF NOT EXISTS idx_violations_city ON violations (city)",
     ),
     (
         "Create zones unique-name index",

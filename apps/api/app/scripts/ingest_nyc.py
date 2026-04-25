@@ -114,13 +114,14 @@ def main() -> None:
 
     # Use CAST(... AS TIMESTAMP) instead of ::timestamp so SQLAlchemy doesn't treat "::" as a second parameter
     insert_sql = text("""
-        INSERT INTO violations (occurred_at, violation_type, geom, raw_lat, raw_lon)
+        INSERT INTO violations (occurred_at, violation_type, geom, raw_lat, raw_lon, city)
         VALUES (
             CAST(:occurred_at AS TIMESTAMP),
             :violation_type,
             ST_SetSRID(ST_MakePoint(:lon, :lat), 4326),
             :lat,
-            :lon
+            :lon,
+            :city
         )
     """)
 
@@ -136,6 +137,7 @@ def main() -> None:
                         "violation_type": r["violation_type"],
                         "lat": r["lat"],
                         "lon": r["lon"],
+                        "city": "nyc",
                     },
                 )
             conn.commit()

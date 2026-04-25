@@ -56,6 +56,7 @@ export type FetchHotspotsParams = {
   hour_start?: number;
   hour_end?: number;
   violation_type?: string;
+  city?: string;
 };
 
 function searchParams(
@@ -72,6 +73,7 @@ function searchParams(
   if (params.hour_start != null) p.set('hour_start', String(params.hour_start));
   if (params.hour_end != null) p.set('hour_end', String(params.hour_end));
   if (params.violation_type != null) p.set('violation_type', params.violation_type);
+  if (params.city != null) p.set('city', params.city);
   return p.toString();
 }
 
@@ -99,6 +101,7 @@ function hotspotsCacheKey(params: FetchHotspotsParams): string {
   if (params.hour_start != null) k.push(String(params.hour_start));
   if (params.hour_end != null) k.push(String(params.hour_end));
   if (params.violation_type != null) k.push(params.violation_type);
+  if (params.city != null) k.push(params.city);
   return k.join('|');
 }
 
@@ -172,23 +175,30 @@ export async function fetchHotspotsGridCached(
   return promise;
 }
 
-export async function fetchStats(bbox?: string, signal?: AbortSignal): Promise<StatsResponse> {
-  const url = bbox
-    ? `${API_BASE}/violations/stats?bbox=${encodeURIComponent(bbox)}`
-    : `${API_BASE}/violations/stats`;
+export async function fetchStats(
+  bbox?: string,
+  city?: string,
+  signal?: AbortSignal
+): Promise<StatsResponse> {
+  const p = new URLSearchParams();
+  if (bbox) p.set('bbox', bbox);
+  if (city) p.set('city', city);
+  const qs = p.toString();
+  const url = qs ? `${API_BASE}/violations/stats?${qs}` : `${API_BASE}/violations/stats`;
   const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`Stats: HTTP ${res.status}`);
   return res.json();
 }
 
 export async function fetchRisk(
-  params: { bbox: string; granularity?: string; horizon?: number },
+  params: { bbox: string; granularity?: string; horizon?: number; city?: string },
   signal?: AbortSignal
 ): Promise<RiskResponse> {
   const p = new URLSearchParams();
   p.set('bbox', params.bbox);
   p.set('granularity', params.granularity ?? 'hour');
   p.set('horizon', String(params.horizon ?? 24));
+  if (params.city) p.set('city', params.city);
   const res = await fetch(`${API_BASE}/predict/risk?${p}`, { signal });
   if (!res.ok) throw new Error(`Risk: HTTP ${res.status}`);
   return res.json();
@@ -204,13 +214,14 @@ export type ForecastResponse = {
 };
 
 export async function fetchForecast(
-  params: { bbox: string; granularity?: string; horizon?: number },
+  params: { bbox: string; granularity?: string; horizon?: number; city?: string },
   signal?: AbortSignal
 ): Promise<ForecastResponse> {
   const p = new URLSearchParams();
   p.set('bbox', params.bbox);
   p.set('granularity', params.granularity ?? 'day');
   p.set('horizon', String(params.horizon ?? 30));
+  if (params.city) p.set('city', params.city);
   const res = await fetch(`${API_BASE}/predict/forecast?${p}`, { signal });
   if (!res.ok) throw new Error(`Forecast: HTTP ${res.status}`);
   return res.json();
@@ -257,8 +268,11 @@ export type ZoneCompareResponse = {
   meta?: { response_cache?: 'hit' | 'miss'; [k: string]: unknown };
 };
 
-export async function fetchZones(signal?: AbortSignal): Promise<ZonesListResponse> {
-  const res = await fetch(`${API_BASE}/api/zones?limit=200`, { signal });
+export async function fetchZones(city?: string, signal?: AbortSignal): Promise<ZonesListResponse> {
+  const p = new URLSearchParams();
+  p.set('limit', '200');
+  if (city) p.set('city', city);
+  const res = await fetch(`${API_BASE}/api/zones?${p}`, { signal });
   if (!res.ok) throw new Error(`Zones: HTTP ${res.status}`);
   return res.json();
 }
@@ -317,12 +331,13 @@ export type ZoneRankingsResponse = {
 };
 
 export async function fetchZoneRankings(
-  params?: { sort_by?: ZoneRankingsSortBy; limit?: number },
+  params?: { sort_by?: ZoneRankingsSortBy; limit?: number; city?: string },
   signal?: AbortSignal
 ): Promise<ZoneRankingsResponse> {
   const p = new URLSearchParams();
   p.set('sort_by', params?.sort_by ?? 'risk');
   p.set('limit', String(params?.limit ?? 20));
+  if (params?.city) p.set('city', params.city);
   const res = await fetch(`${API_BASE}/api/zones/rankings?${p}`, { signal });
   if (!res.ok) throw new Error(`Rankings: HTTP ${res.status}`);
   return res.json();
@@ -353,12 +368,13 @@ export type WarningsResponse = {
 };
 
 export async function fetchWarnings(
-  params?: { limit?: number },
+  params?: { limit?: number; city?: string },
   signal?: AbortSignal
 ): Promise<WarningsResponse> {
   const p = new URLSearchParams();
   p.set('scope', 'zones');
   p.set('limit', String(params?.limit ?? 25));
+  if (params?.city) p.set('city', params.city);
   const res = await fetch(`${API_BASE}/api/warnings?${p}`, { signal });
   if (!res.ok) throw new Error(`Warnings: HTTP ${res.status}`);
   return res.json();

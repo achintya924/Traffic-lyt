@@ -17,6 +17,7 @@ class ViolationFilters(BaseModel):
     hour_end: Optional[int] = None   # 0..23
     violation_type: Optional[str] = None
     bbox: Optional[str] = None  # "minLon,minLat,maxLon,maxLat"
+    city: Optional[str] = None  # e.g. 'nyc', 'london'
 
 
 def get_violation_filters(
@@ -26,6 +27,7 @@ def get_violation_filters(
     hour_end: Optional[int] = Query(None, ge=0, le=23, description="End hour (0-23), can wrap past midnight"),
     violation_type: Optional[str] = Query(None, description="Exact violation_type match"),
     bbox: Optional[str] = Query(None, description="Bounding box: minLon,minLat,maxLon,maxLat"),
+    city: Optional[str] = Query(None, description="Filter by city (e.g. 'nyc', 'london')"),
 ) -> ViolationFilters:
     if start is not None and end is not None and start > end:
         raise HTTPException(status_code=422, detail="start must be <= end")
@@ -36,6 +38,7 @@ def get_violation_filters(
         hour_end=hour_end,
         violation_type=violation_type.strip() if violation_type else None,
         bbox=bbox,
+        city=city.strip().lower() if city else None,
     )
 
 
@@ -103,6 +106,10 @@ def build_violation_where(
     elif h_end is not None:
         clauses.append("EXTRACT(HOUR FROM occurred_at) = :hour_end")
         params["hour_end"] = h_end
+
+    if filters.city:
+        clauses.append("city = :city")
+        params["city"] = filters.city
 
     # Optional spatial filter via bbox: geom && ST_MakeEnvelope(...)
     bbox_tuple = _parse_bbox(filters.bbox)

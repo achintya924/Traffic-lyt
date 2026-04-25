@@ -10,6 +10,7 @@ import {
 import ZoneMultiSelect from '@/app/components/ZoneMultiSelect';
 import CachePill from '@/app/components/CachePill';
 import InfoTooltip from '@/app/components/InfoTooltip';
+import { useCity } from '@/app/lib/CityContext';
 // no csv import needed — decision page uses window.print() only
 
 const SEVERITY_COLOR: Record<string, string> = {
@@ -77,6 +78,8 @@ function SkeletonRows({ count = 5 }: { count?: number }) {
 }
 
 export default function DecisionPage() {
+  const { city } = useCity();
+  const cityParam = city !== 'all' ? city : undefined;
   const [zones, setZones] = useState<ZoneSummary[]>([]);
   const [zonesLoading, setZonesLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -94,7 +97,7 @@ export default function DecisionPage() {
     if (!localStorage.getItem('decision-walkthrough-dismissed')) {
       setBannerDismissed(false);
     }
-  }, []);
+  }, [cityParam]);
 
   const dismissBanner = () => {
     localStorage.setItem('decision-walkthrough-dismissed', '1');
@@ -104,7 +107,7 @@ export default function DecisionPage() {
   useEffect(() => {
     const ac = new AbortController();
     setZonesLoading(true);
-    fetchZones(ac.signal)
+    fetchZones(cityParam, ac.signal)
       .then((res) => setZones(res.zones ?? []))
       .catch((e) => {
         if ((e as { name?: string })?.name === 'AbortError') return;

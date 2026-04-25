@@ -107,6 +107,7 @@ def _filters_with_anchored_window(
             hour_end=filters.hour_end,
             violation_type=filters.violation_type,
             bbox=filters.bbox,
+            city=filters.city,
         )
     else:
         filters_to_use = filters

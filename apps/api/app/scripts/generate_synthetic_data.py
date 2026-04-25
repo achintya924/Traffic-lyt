@@ -180,6 +180,7 @@ def generate_records(rng: np.random.Generator) -> list[dict]:
             "violation_type": v_labels[v_indices[i]],
             "lat":            float(lats[i]),
             "lon":            float(lons[i]),
+            "city":           "nyc",
         })
     return records
 
@@ -189,13 +190,14 @@ def generate_records(rng: np.random.Generator) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 _INSERT_SQL = text("""
-    INSERT INTO violations (occurred_at, violation_type, geom, raw_lat, raw_lon)
+    INSERT INTO violations (occurred_at, violation_type, geom, raw_lat, raw_lon, city)
     VALUES (
         CAST(:occurred_at AS TIMESTAMP),
         :violation_type,
         ST_SetSRID(ST_MakePoint(:lon, :lat), 4326),
         :lat,
-        :lon
+        :lon,
+        :city
     )
 """)
 
@@ -268,7 +270,7 @@ def main() -> None:
     # Check how many rows are already present so a partial run can continue
     # from where it left off instead of truncating and starting over.
     with engine.connect() as conn:
-        existing = conn.execute(text("SELECT COUNT(*) FROM violations")).scalar() or 0
+        existing = conn.execute(text("SELECT COUNT(*) FROM violations WHERE city = 'nyc'")).scalar() or 0
 
     rng     = np.random.default_rng(RNG_SEED)
     records = generate_records(rng)
@@ -287,9 +289,9 @@ def main() -> None:
         )
         records = records[existing:]
     else:
-        logger.info("Fresh run — truncating violations table…")
+        logger.info("Fresh run — deleting existing NYC violations…")
         with engine.connect() as conn:
-            conn.execute(text("TRUNCATE TABLE violations RESTART IDENTITY"))
+            conn.execute(text("DELETE FROM violations WHERE city = 'nyc'"))
             conn.commit()
 
     logger.info(

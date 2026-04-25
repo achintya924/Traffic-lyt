@@ -10,6 +10,7 @@ import {
 } from '@/app/lib/api';
 import ZoneComparePanel from '@/app/components/ZoneComparePanel';
 import InfoTooltip from '@/app/components/InfoTooltip';
+import { useCity } from '@/app/lib/CityContext';
 import CachePill from '@/app/components/CachePill';
 import { downloadCsv, csvDate } from '@/app/lib/csv';
 
@@ -69,6 +70,8 @@ function ErrorCard({
 }
 
 export default function ZonesPage() {
+  const { city } = useCity();
+  const cityParam = city !== 'all' ? city : undefined;
   const [zones, setZones] = useState<ZoneSummary[]>([]);
   const [zonesLoading, setZonesLoading] = useState(true);
   const [zonesError, setZonesError] = useState<string | null>(null);
@@ -86,7 +89,7 @@ export default function ZonesPage() {
     const ac = new AbortController();
     setZonesLoading(true);
     setZonesError(null);
-    fetchZones(ac.signal)
+    fetchZones(cityParam, ac.signal)
       .then((res) => setZones(res.zones ?? []))
       .catch((e) => {
         if ((e as { name?: string })?.name === 'AbortError') return;
@@ -95,13 +98,13 @@ export default function ZonesPage() {
       })
       .finally(() => setZonesLoading(false));
     return () => ac.abort();
-  }, [zonesKey]);
+  }, [zonesKey, cityParam]);
 
   useEffect(() => {
     const ac = new AbortController();
     setRankingsLoading(true);
     setRankingsError(null);
-    fetchZoneRankings({ sort_by: sortBy, limit: 20 }, ac.signal)
+    fetchZoneRankings({ sort_by: sortBy, limit: 20, city: cityParam }, ac.signal)
       .then((res) => {
         setRankings(res.rankings ?? []);
         setRankingsCacheHit(res.meta?.response_cache === 'hit');
@@ -113,7 +116,7 @@ export default function ZonesPage() {
       })
       .finally(() => setRankingsLoading(false));
     return () => ac.abort();
-  }, [sortBy, rankingsKey]);
+  }, [sortBy, rankingsKey, cityParam]);
 
   const handleExportRankings = () => {
     const rows: (string | number)[][] = [

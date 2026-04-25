@@ -1,11 +1,11 @@
 """
-Replace auto-generated test zones with realistic named NYC neighborhood zones.
+Initialise the zones table with 8 Camden Borough ward zones.
 
-Run: python -m app.scripts.init_nyc_zones
-  (from container: docker compose -f infra/docker-compose.yml exec api python -m app.scripts.init_nyc_zones)
+Run: python -m app.scripts.init_london_zones
+  (from container: docker compose exec api python -m app.scripts.init_london_zones)
 
-Each zone is created as a rectangular polygon using ST_MakeEnvelope(minx, miny, maxx, maxy, 4326).
 Existing zones are deleted first so this script is safe to re-run.
+Coordinates are WGS-84 decimal degrees (EPSG:4326).
 """
 import logging
 import os
@@ -15,16 +15,16 @@ from sqlalchemy import create_engine, text
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-# (name, zone_type, minx, miny, maxx, maxy)
-NYC_ZONES = [
-    ("Midtown Manhattan",  "neighborhood", -74.00, 40.745, -73.97, 40.765),
-    ("Lower Manhattan",    "neighborhood", -74.02, 40.700, -73.99, 40.720),
-    ("Brooklyn Downtown",  "neighborhood", -74.00, 40.685, -73.97, 40.705),
-    ("Williamsburg",       "neighborhood", -73.97, 40.705, -73.94, 40.725),
-    ("Astoria Queens",     "neighborhood", -73.94, 40.765, -73.91, 40.785),
-    ("South Bronx",        "neighborhood", -73.93, 40.815, -73.90, 40.835),
-    ("Harlem",             "neighborhood", -73.96, 40.800, -73.93, 40.820),
-    ("Upper East Side",    "neighborhood", -73.97, 40.765, -73.95, 40.785),
+# (name, zone_type, minLon, minLat, maxLon, maxLat)
+CAMDEN_ZONES = [
+    ("Bloomsbury",    "neighborhood", -0.138, 51.514, -0.110, 51.528),
+    ("Camden Town",   "neighborhood", -0.155, 51.534, -0.128, 51.548),
+    ("Hampstead",     "neighborhood", -0.185, 51.547, -0.148, 51.568),
+    ("Kentish Town",  "neighborhood", -0.152, 51.544, -0.128, 51.558),
+    ("Kings Cross",   "neighborhood", -0.130, 51.526, -0.106, 51.538),
+    ("Gospel Oak",    "neighborhood", -0.165, 51.552, -0.140, 51.564),
+    ("Holborn",       "neighborhood", -0.125, 51.510, -0.097, 51.524),
+    ("Swiss Cottage", "neighborhood", -0.178, 51.538, -0.155, 51.552),
 ]
 
 _INSERT_SQL = text("""
@@ -55,7 +55,7 @@ def main() -> None:
         conn.commit()
         logger.info("Deleted %d existing zone(s).", deleted)
 
-        for name, zone_type, minx, miny, maxx, maxy in NYC_ZONES:
+        for name, zone_type, minx, miny, maxx, maxy in CAMDEN_ZONES:
             conn.execute(_INSERT_SQL, {
                 "name":      name,
                 "zone_type": zone_type,
@@ -63,15 +63,15 @@ def main() -> None:
                 "miny":      miny,
                 "maxx":      maxx,
                 "maxy":      maxy,
-                "city":      "nyc",
+                "city":      "london",
             })
             conn.commit()
             logger.info(
-                "Inserted zone: %s  [%.4f,%.4f → %.4f,%.4f]",
+                "Inserted zone: %-16s  [%.3f, %.3f → %.3f, %.3f]",
                 name, minx, miny, maxx, maxy,
             )
 
-    logger.info("Done. %d NYC neighborhood zones inserted.", len(NYC_ZONES))
+    logger.info("Done. %d Camden ward zones inserted.", len(CAMDEN_ZONES))
 
 
 if __name__ == "__main__":

@@ -27,9 +27,10 @@ def _rankings_signature(
     granularity: str,
     limit: int,
     sort_by: str,
+    city: str | None = None,
 ) -> str:
     """Deterministic signature for rankings cache key."""
-    return f"s{start_ts or ''}|e{end_ts or ''}|g{granularity}|l{limit}|sb{sort_by}"
+    return f"s{start_ts or ''}|e{end_ts or ''}|g{granularity}|l{limit}|sb{sort_by}|c{city or ''}"
 
 
 def _min_max_normalize(val: float, min_v: float, max_v: float) -> float:
@@ -47,6 +48,7 @@ def get_zone_rankings(
     granularity: str = Query("day", description="hour | day"),
     limit: int = Query(10, ge=1, le=100),
     sort_by: str = Query("risk", description="risk | trend | volume"),
+    city: str | None = Query(None, description="Filter by city (e.g. 'nyc', 'london')"),
 ) -> dict[str, Any]:
     """
     Zone rankings: compare zones by risk (volume + positive trend), trend, or volume.
@@ -75,6 +77,9 @@ def get_zone_rankings(
         if end_ts is not None:
             time_clauses.append("v.occurred_at <= :end_ts")
             base_params["end_ts"] = end_ts
+        if city and city.strip():
+            time_clauses.append("v.city = :city")
+            base_params["city"] = city.strip().lower()
         time_where = (" AND " + " AND ".join(time_clauses)) if time_clauses else ""
 
         if not time_clauses:
@@ -107,6 +112,7 @@ def get_zone_rankings(
             granularity,
             limit,
             sort_by,
+            city=city.strip().lower() if city else None,
         )
         resp_key = make_response_key("zone_rankings", sig, anchor_ts_str, effective_window)
         resp_cache = get_response_cache()

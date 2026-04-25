@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useCity } from '@/app/lib/CityContext';
 import { useEffect, useState } from 'react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
@@ -63,6 +64,8 @@ function StatCard({ label, stat }: { label: string; stat: StatState }) {
 }
 
 export default function Home() {
+  const { city } = useCity();
+  const cityParam = city !== 'all' ? city : undefined;
   const [violations, setViolations] = useState<StatState>({ value: '-', loading: true });
   const [zones,      setZones]      = useState<StatState>({ value: '-', loading: true });
   const [warnings,   setWarnings]   = useState<StatState>({ value: '-', loading: true });
@@ -71,23 +74,23 @@ export default function Home() {
     const ac  = new AbortController();
     const sig = ac.signal;
 
-    fetch(`${API_BASE}/violations/stats`, { signal: sig })
+    fetch(`${API_BASE}/violations/stats${cityParam ? '?city=' + cityParam : ''}`, { signal: sig })
       .then((r) => r.json())
       .then((d) => setViolations({ value: (d.total ?? 0).toLocaleString(), loading: false }))
       .catch((e) => { if (e?.name !== 'AbortError') setViolations({ value: '-', loading: false }); });
 
-    fetch(`${API_BASE}/api/zones?limit=200`, { signal: sig })
+    fetch(`${API_BASE}/api/zones?limit=200${cityParam ? '&city=' + cityParam : ''}`, { signal: sig })
       .then((r) => r.json())
       .then((d) => setZones({ value: String((d.zones ?? []).length), loading: false }))
       .catch((e) => { if (e?.name !== 'AbortError') setZones({ value: '-', loading: false }); });
 
-    fetch(`${API_BASE}/api/warnings?limit=50`, { signal: sig })
+    fetch(`${API_BASE}/api/warnings?limit=50${cityParam ? '&city=' + cityParam : ''}`, { signal: sig })
       .then((r) => r.json())
       .then((d) => setWarnings({ value: String((d.warnings ?? []).length), loading: false }))
       .catch((e) => { if (e?.name !== 'AbortError') setWarnings({ value: '-', loading: false }); });
 
     return () => ac.abort();
-  }, []);
+  }, [cityParam]);
 
   return (
     <main className="landing-page">

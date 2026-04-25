@@ -13,6 +13,7 @@ import {
 } from '@/app/lib/api';
 import ZoneMultiSelect from '@/app/components/ZoneMultiSelect';
 import InfoTooltip from '@/app/components/InfoTooltip';
+import { useCity } from '@/app/lib/CityContext';
 import CachePill from '@/app/components/CachePill';
 import { downloadCsv, csvDate } from '@/app/lib/csv';
 import type { PatrolMapMarker } from '@/app/patrol/PatrolMap';
@@ -69,6 +70,8 @@ function SkeletonRows({ count = 5 }: { count?: number }) {
 }
 
 export default function PatrolPage() {
+  const { city } = useCity();
+  const cityParam = city !== 'all' ? city : undefined;
   const [zones, setZones] = useState<ZoneSummary[]>([]);
   const [zonesLoading, setZonesLoading] = useState(true);
   const [zonesError, setZonesError] = useState<string | null>(null);
@@ -84,7 +87,7 @@ export default function PatrolPage() {
   useEffect(() => {
     const ac = new AbortController();
     setZonesLoading(true);
-    fetchZones(ac.signal)
+    fetchZones(cityParam, ac.signal)
       .then((res) => setZones(res.zones ?? []))
       .catch((e) => {
         if ((e as { name?: string })?.name === 'AbortError') return;
@@ -92,7 +95,7 @@ export default function PatrolPage() {
       })
       .finally(() => setZonesLoading(false));
     return () => ac.abort();
-  }, [zonesKey]);
+  }, [zonesKey, cityParam]);
 
   const zonesById = useMemo(() => {
     const m = new Map<number, ZoneSummary>();

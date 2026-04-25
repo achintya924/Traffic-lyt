@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
+import { useCity, type City } from '@/app/lib/CityContext';
 
 const LINKS: { href: string; label: string; primary?: boolean }[] = [
   { href: '/map', label: 'Map' },
@@ -13,9 +14,16 @@ const LINKS: { href: string; label: string; primary?: boolean }[] = [
   { href: '/decision', label: 'Decision', primary: true },
 ];
 
+const CITY_OPTIONS: { value: City; label: string }[] = [
+  { value: 'all', label: 'All Cities' },
+  { value: 'nyc', label: 'New York City' },
+  { value: 'london', label: 'London' },
+];
+
 export default function NavBar() {
   const pathname = usePathname() ?? '';
   const [menuOpen, setMenuOpen] = useState(false);
+  const { city, setCity } = useCity();
   return (
     <nav className="site-nav" aria-label="Primary">
       <Link
@@ -49,6 +57,25 @@ export default function NavBar() {
             </Link>
           );
         })}
+        <select
+          value={city}
+          onChange={(e) => setCity(e.target.value as City)}
+          aria-label="Select city"
+          style={{
+            background: '#1e293b',
+            color: '#e2e8f0',
+            border: '1px solid #475569',
+            borderRadius: 6,
+            padding: '0.3rem 0.5rem',
+            fontSize: '0.875rem',
+            cursor: 'pointer',
+            marginLeft: '0.25rem',
+          }}
+        >
+          {CITY_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
       </div>
     </nav>
   );

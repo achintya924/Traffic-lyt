@@ -10,6 +10,7 @@ import {
 } from '@/app/lib/api';
 import CachePill from '@/app/components/CachePill';
 import InfoTooltip from '@/app/components/InfoTooltip';
+import { useCity } from '@/app/lib/CityContext';
 
 const REFRESH_MS = 60_000;
 
@@ -81,6 +82,8 @@ function SkeletonGrid() {
 }
 
 export default function WarningsPage() {
+  const { city } = useCity();
+  const cityParam = city !== 'all' ? city : undefined;
   const [warnings, setWarnings] = useState<WarningCard[]>([]);
   const [explain, setExplain] = useState<WarningsExplainEntry[]>([]);
   const [cacheHit, setCacheHit] = useState(false);
@@ -99,7 +102,7 @@ export default function WarningsPage() {
       ac?.abort();
       ac = new AbortController();
       if (initial) setLoadState('loading');
-      fetchWarnings({ limit: 50 }, ac.signal)
+      fetchWarnings({ limit: 50, city: cityParam }, ac.signal)
         .then((res) => {
           if (cancelled) return;
           setWarnings(res.warnings ?? []);
@@ -125,7 +128,7 @@ export default function WarningsPage() {
       ac?.abort();
       window.clearInterval(interval);
     };
-  }, [retryCount]);
+  }, [retryCount, cityParam]);
 
   const filtered = useMemo(() => {
     if (severityFilter === 'all') return warnings;

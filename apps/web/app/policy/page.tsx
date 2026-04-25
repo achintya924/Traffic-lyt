@@ -14,6 +14,7 @@ import ZoneMultiSelect from '@/app/components/ZoneMultiSelect';
 import CachePill from '@/app/components/CachePill';
 import InfoTooltip from '@/app/components/InfoTooltip';
 import { downloadCsv, csvDate } from '@/app/lib/csv';
+import { useCity } from '@/app/lib/CityContext';
 
 const MAX_INTERVENTIONS = 5;
 type InterventionType = 'enforcement_intensity' | 'patrol_units' | 'peak_hour_reduction';
@@ -81,6 +82,8 @@ function SkeletonRows({ count = 5 }: { count?: number }) {
 }
 
 export default function PolicyPage() {
+  const { city } = useCity();
+  const cityParam = city !== 'all' ? city : undefined;
   const [zones, setZones] = useState<ZoneSummary[]>([]);
   const [zonesLoading, setZonesLoading] = useState(true);
   const [zonesError, setZonesError] = useState<string | null>(null);
@@ -97,7 +100,7 @@ export default function PolicyPage() {
     const ac = new AbortController();
     setZonesLoading(true);
     setZonesError(null);
-    fetchZones(ac.signal)
+    fetchZones(cityParam, ac.signal)
       .then((res) => setZones(res.zones ?? []))
       .catch((e) => {
         if ((e as { name?: string })?.name === 'AbortError') return;
@@ -105,7 +108,7 @@ export default function PolicyPage() {
       })
       .finally(() => setZonesLoading(false));
     return () => ac.abort();
-  }, [zonesKey]);
+  }, [zonesKey, cityParam]);
 
   const zonesById = useMemo(() => {
     const m = new Map<number, ZoneSummary>();

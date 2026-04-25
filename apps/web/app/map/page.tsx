@@ -19,6 +19,7 @@ import {
 } from '@/app/lib/api';
 import AnchorInfo from '@/app/components/AnchorInfo';
 import InfoTooltip from '@/app/components/InfoTooltip';
+import { useCity } from '@/app/lib/CityContext';
 import CachePill from '@/app/components/CachePill';
 import RiskLegend from '@/app/components/RiskLegend';
 import RiskPanel, { type ForecastMode } from '@/app/components/RiskPanel';
@@ -117,6 +118,8 @@ function MapPageContent() {
   const [cacheHit, setCacheHit] = useState(false);
   const [showLoadingSpinner, setShowLoadingSpinner] = useState(false);
   const [zoom, setZoom] = useState<number>(11);
+  const { city, mapCenter, mapZoom } = useCity();
+  const cityParam = city !== 'all' ? city : undefined;
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
@@ -160,15 +163,16 @@ function MapPageContent() {
     return 350;
   }
 
-  // Stats + aggregations: mount-only
+  // Stats + aggregations: mount + city change
   useEffect(() => {
     let cancelled = false;
+    const cityQs = cityParam ? `?city=${cityParam}` : '';
     async function fetchOther() {
       try {
         const [statsRes, hourRes, dayRes] = await Promise.all([
-          fetch(`${API_BASE}/violations/stats`),
-          fetch(`${API_BASE}/aggregations/time/hour`),
-          fetch(`${API_BASE}/aggregations/time/day`),
+          fetch(`${API_BASE}/violations/stats${cityQs}`),
+          fetch(`${API_BASE}/aggregations/time/hour${cityQs}`),
+          fetch(`${API_BASE}/aggregations/time/day${cityQs}`),
         ]);
         const statsJson: StatsResponse = await statsRes.json();
         if (!cancelled && typeof statsJson.total === 'number') setStatsTotal(statsJson.total);
@@ -188,17 +192,22 @@ function MapPageContent() {
     }
     fetchOther();
     return () => { cancelled = true; };
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cityParam]);
 
-  // Violations: zoom-tier-aware (re-fetches only when tier changes)
+  // Violations: zoom-tier-aware + city-aware (re-fetches when tier or city changes)
   const violationsLimitRef = useRef<number | null>(null);
+  const violationsCityRef = useRef<string | undefined>(undefined);
   const zoomEffectMountRef = useRef(false);
   useEffect(() => {
+    const limit = getViolationsLimit(zoom);
+    const cityQs = cityParam ? `&city=${cityParam}` : '';
     if (!zoomEffectMountRef.current) {
       zoomEffectMountRef.current = true;
-      violationsLimitRef.current = getViolationsLimit(zoom);
+      violationsLimitRef.current = limit;
+      violationsCityRef.current = cityParam;
       let cancelled = false;
-      fetch(`${API_BASE}/violations?limit=${violationsLimitRef.current}`)
+      fetch(`${API_BASE}/violations?limit=${limit}${cityQs}`)
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
         .then((json: ViolationsResponse) => {
           if (cancelled) return;
@@ -208,11 +217,13 @@ function MapPageContent() {
         .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
       return () => { cancelled = true; };
     }
-    const limit = getViolationsLimit(zoom);
-    if (violationsLimitRef.current === limit) return;
+    const tierChanged = violationsLimitRef.current !== limit;
+    const cityChanged = violationsCityRef.current !== cityParam;
+    if (!tierChanged && !cityChanged) return;
     violationsLimitRef.current = limit;
+    violationsCityRef.current = cityParam;
     let cancelled = false;
-    fetch(`${API_BASE}/violations?limit=${limit}`)
+    fetch(`${API_BASE}/violations?limit=${limit}${cityQs}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((json: ViolationsResponse) => {
         if (cancelled) return;
@@ -222,7 +233,7 @@ function MapPageContent() {
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [zoom]);
+  }, [zoom, cityParam]);
 
   const prevBboxRef = useRef<string | null>(null);
 
@@ -249,7 +260,8 @@ function MapPageContent() {
     const ac = new AbortController();
     setHeatmapError(null);
     setHeatmapLoading(true);
-    const url = `${API_BASE}/aggregations/grid?cell_m=${gridSize}&bbox=${bboxString(bounds)}`;
+    const cityQs = cityParam ? `&city=${cityParam}` : '';
+    const url = `${API_BASE}/aggregations/grid?cell_m=${gridSize}&bbox=${bboxString(bounds)}${cityQs}`;
     fetch(url, { signal: ac.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -266,7 +278,7 @@ function MapPageContent() {
       })
       .finally(() => setHeatmapLoading(false));
     return () => ac.abort();
-  }, [viewMode, bounds, gridSize]);
+  }, [viewMode, bounds, gridSize, cityParam]);
 
   // Re-fetch viewport-aware analytics (stats + hour/day + hotspots + risk) with AbortController.
   // Debounced bounds (500ms) + moveend/zoomend only; bbox equality avoids redundant triggers.
@@ -295,14 +307,15 @@ function MapPageContent() {
     loadingDelayRef.current = setTimeout(() => setShowLoadingSpinner(true), 150);
 
     const bbox = bboxString(bounds);
+    const cityQs = cityParam ? `&city=${cityParam}` : '';
 
     let gotStatsMeta = false;
     async function fetchViewportAnalytics() {
       try {
         const [statsRes, hourRes, dayRes] = await Promise.all([
-          fetch(`${API_BASE}/violations/stats?bbox=${bbox}`, { signal }),
-          fetch(`${API_BASE}/aggregations/time/hour?bbox=${bbox}`, { signal }),
-          fetch(`${API_BASE}/aggregations/time/day?bbox=${bbox}`, { signal }),
+          fetch(`${API_BASE}/violations/stats?bbox=${bbox}${cityQs}`, { signal }),
+          fetch(`${API_BASE}/aggregations/time/hour?bbox=${bbox}${cityQs}`, { signal }),
+          fetch(`${API_BASE}/aggregations/time/day?bbox=${bbox}${cityQs}`, { signal }),
         ]);
         if (signal.aborted) return;
         if (!statsRes.ok || !hourRes.ok || !dayRes.ok) return;
@@ -329,6 +342,7 @@ function MapPageContent() {
         recent_days: 7,
         baseline_days: 30,
         limit: 3000,
+        city: cityParam,
       };
       const maxAttempts = 3;
       const backoffMs = [600, 1200, 2400];
@@ -380,7 +394,7 @@ function MapPageContent() {
       await fetchHotspotsWithRetry(0);
 
       try {
-        const risk = await fetchRisk({ bbox, granularity: 'hour', horizon: 24 }, signal);
+        const risk = await fetchRisk({ bbox, granularity: 'hour', horizon: 24, city: cityParam }, signal);
         if (signal.aborted) return;
         setRiskData(risk);
       } catch (e) {
@@ -389,7 +403,7 @@ function MapPageContent() {
       }
 
       try {
-        const forecast = await fetchForecast({ bbox, granularity: 'day', horizon: 30 }, signal);
+        const forecast = await fetchForecast({ bbox, granularity: 'day', horizon: 30, city: cityParam }, signal);
         if (signal.aborted) return;
         setForecast30dData(forecast);
       } catch (e) {
@@ -421,7 +435,7 @@ function MapPageContent() {
         loadingDelayRef.current = null;
       }
     };
-  }, [bounds, gridSize]);
+  }, [bounds, gridSize, cityParam]);
 
   if (loading) {
     return (
@@ -542,6 +556,8 @@ function MapPageContent() {
               onFlyToDone={() => setFlyToTarget(null)}
               fitBounds={fitBounds}
               onFitBoundsDone={() => setFitBounds(null)}
+              center={mapCenter}
+              zoom={mapZoom}
             />
           </div>
           <div style={{ background: '#1e293b', borderRadius: 8, padding: '0.75rem 1rem' }}>

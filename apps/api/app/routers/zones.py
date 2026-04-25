@@ -174,6 +174,7 @@ def list_zones(
     zone_type: str | None = Query(None, description="Filter by zone_type"),
     search: str | None = Query(None, description="Search by name (ILIKE)"),
     include_geom: bool = Query(False, alias="includeGeom"),
+    city: str | None = Query(None, description="Filter by city (e.g. 'nyc', 'london')"),
 ) -> dict[str, Any]:
     """List zones. By default excludes geometry; use includeGeom=true to include."""
     engine = get_engine()
@@ -192,8 +193,11 @@ def list_zones(
         if search and search.strip():
             conditions.append("name ILIKE :search")
             params["search"] = f"%{search.strip()}%"
+        if city and city.strip():
+            conditions.append("city = :city")
+            params["city"] = city.strip().lower()
 
-        where = (" AND " + " AND ".join(conditions)) if conditions else ""
+        where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
 
         if include_geom:
             geom_col = "ST_AsGeoJSON(geom)::json AS geom"
@@ -212,7 +216,7 @@ def list_zones(
             params,
         ).fetchall()
 
-        count_params = {k: v for k, v in params.items() if k in ("zone_type", "search")}
+        count_params = {k: v for k, v in params.items() if k in ("zone_type", "search", "city")}
         total = conn.execute(
             text(f"SELECT COUNT(*)::int FROM zones {where}"),
             count_params,

@@ -35,9 +35,10 @@ def _warnings_signature(
     start_ts: str | None,
     end_ts: str | None,
     limit: int,
+    city: str | None = None,
 ) -> str:
     """Deterministic signature for warnings cache key."""
-    return f"sc{scope}|b{bbox or ''}|s{start_ts or ''}|e{end_ts or ''}|l{limit}"
+    return f"sc{scope}|b{bbox or ''}|s{start_ts or ''}|e{end_ts or ''}|l{limit}|c{city or ''}"
 
 
 def _zscore_anomaly_cells(counts: list[int], threshold: float) -> int:
@@ -91,6 +92,7 @@ def get_warnings(
     start_ts: datetime | None = Query(None),
     end_ts: datetime | None = Query(None),
     limit: int = Query(10, ge=1, le=100),
+    city: str | None = Query(None, description="Filter by city (e.g. 'nyc', 'london')"),
 ) -> dict[str, Any]:
     """
     Early warning indicators: zones (or viewport) that need attention.
@@ -113,6 +115,10 @@ def get_warnings(
             raise HTTPException(status_code=503, detail="Database connection failed")
 
         base_params: dict[str, Any] = {}
+        city_clause = ""
+        if city and city.strip():
+            city_clause = " AND v.city = :city"
+            base_params["city"] = city.strip().lower()
 
         if start_ts is not None and end_ts is not None:
             effective_start = start_ts
@@ -144,6 +150,7 @@ def get_warnings(
             to_utc_iso(start_ts) if start_ts else None,
             to_utc_iso(end_ts) if end_ts else None,
             limit,
+            city=city.strip().lower() if city else None,
         )
         resp_key = make_response_key("warnings", sig, anchor_ts_str, effective_window)
         resp_cache = get_response_cache()
@@ -154,11 +161,11 @@ def get_warnings(
             out["meta"] = {**cached.get("meta", {}), "response_cache": "hit"}
             return out
 
-        top_zones_sql = """
+        top_zones_sql = f"""
             SELECT z.id, z.name, z.zone_type
             FROM zones z
             INNER JOIN violations v ON ST_Intersects(z.geom, v.geom)
-            WHERE v.occurred_at >= :start_ts AND v.occurred_at <= :end_ts
+            WHERE v.occurred_at >= :start_ts AND v.occurred_at <= :end_ts{city_clause}
             GROUP BY z.id, z.name, z.zone_type
             ORDER BY COUNT(*) DESC
             LIMIT :k
@@ -173,11 +180,11 @@ def get_warnings(
         zone_ids = [r[0] for r in zone_rows]
         zones_by_id = {r[0]: {"id": r[0], "name": r[1], "zone_type": r[2]} for r in zone_rows}
 
-        ts_sql = """
+        ts_sql = f"""
             SELECT z.id, date_trunc('day', v.occurred_at) AS bucket_ts, COUNT(*)::int AS cnt
             FROM zones z
             INNER JOIN violations v ON ST_Intersects(z.geom, v.geom)
-            WHERE z.id = ANY(:zone_ids) AND v.occurred_at >= :start_ts AND v.occurred_at <= :end_ts
+            WHERE z.id = ANY(:zone_ids) AND v.occurred_at >= :start_ts AND v.occurred_at <= :end_ts{city_clause}
             GROUP BY z.id, date_trunc('day', v.occurred_at)
             ORDER BY z.id, bucket_ts
         """
@@ -203,7 +210,7 @@ def get_warnings(
             "mom_prev_end": mom_prev_end,
         }
 
-        wow_mom_sql = """
+        wow_mom_sql = f"""
             SELECT z.id,
                    SUM(CASE WHEN v.occurred_at >= :wow_curr_start AND v.occurred_at <= :wow_curr_end THEN 1 ELSE 0 END)::int AS wow_curr,
                    SUM(CASE WHEN v.occurred_at >= :wow_prev_start AND v.occurred_at < :wow_prev_end THEN 1 ELSE 0 END)::int AS wow_prev,
@@ -212,7 +219,7 @@ def get_warnings(
             FROM zones z
             INNER JOIN violations v ON ST_Intersects(z.geom, v.geom)
             WHERE z.id = ANY(:zone_ids)
-              AND v.occurred_at >= :mom_prev_start AND v.occurred_at <= :mom_curr_end
+              AND v.occurred_at >= :mom_prev_start AND v.occurred_at <= :mom_curr_end{city_clause}
             GROUP BY z.id
         """
         wow_mom_rows = conn.execute(text(wow_mom_sql), wow_mom_params).fetchall()
@@ -229,7 +236,7 @@ def get_warnings(
                    date_trunc('day', occurred_at) AS bucket_ts,
                    COUNT(*)::int AS cnt
             FROM violations
-            WHERE occurred_at >= :start_ts AND occurred_at <= :end_ts
+            WHERE occurred_at >= :start_ts AND occurred_at <= :end_ts{city_clause}
             GROUP BY cell_lon, cell_lat, bucket_ts
         """
         grid_params = {**base_params, "grid_size": GRID_SIZE_DEG}

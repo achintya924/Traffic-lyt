@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import NavBar from './components/NavBar';
 import NavigationProgress from './components/NavigationProgress';
+import { CityProvider } from './lib/CityContext';
 
 export const metadata: Metadata = {
   title: {
@@ -30,8 +31,10 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <NavigationProgress />
-        <NavBar />
-        {children}
+        <CityProvider>
+          <NavBar />
+          {children}
+        </CityProvider>
       </body>
     </html>
   );

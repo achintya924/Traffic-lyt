@@ -10,6 +10,18 @@ import 'leaflet.heat';
 import { useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 
+function ViewSetter({ center, zoom }: { center: [number, number]; zoom: number }) {
+  const map = useMap();
+  const isMount = useRef(true);
+  useEffect(() => {
+    if (isMount.current) { isMount.current = false; return; }
+    map.setView(center, zoom, { animate: true });
+  // center reference is stable per city (from CITY_MAP constant), so ref comparison works
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, center, zoom]);
+  return null;
+}
+
 // Fix default marker icons in Next.js (leaflet uses file paths that break with bundlers)
 const defaultIcon = L.icon({
   iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
@@ -146,6 +158,8 @@ type ViolationsMapProps = {
   onFlyToDone?: () => void;
   fitBounds?: MapBounds | null;
   onFitBoundsDone?: () => void;
+  center?: [number, number];
+  zoom?: number;
 };
 
 export default function ViolationsMap({
@@ -158,11 +172,13 @@ export default function ViolationsMap({
   onFlyToDone = () => {},
   fitBounds = null,
   onFitBoundsDone = () => {},
+  center = NYC_CENTER,
+  zoom: zoomProp = ZOOM,
 }: ViolationsMapProps) {
   return (
     <MapContainer
-      center={NYC_CENTER}
-      zoom={ZOOM}
+      center={center}
+      zoom={zoomProp}
       style={{ height: '100%', width: '100%' }}
       scrollWheelZoom
     >
@@ -172,6 +188,7 @@ export default function ViolationsMap({
       />
       <BoundsReporter onBoundsChange={onBoundsChange} />
       {onZoomChange && <ZoomReporter onZoomChange={onZoomChange} />}
+      <ViewSetter center={center} zoom={zoomProp} />
       <FlyToTarget target={flyToTarget ?? null} onDone={onFlyToDone} />
       <FitBounds bounds={fitBounds} onDone={onFitBoundsDone} />
       {viewMode === 'heatmap' && <HeatmapLayer points={heatmapPoints} />}
