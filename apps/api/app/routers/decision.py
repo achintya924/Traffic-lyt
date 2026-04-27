@@ -499,39 +499,48 @@ def decision_now(request: Request, body: DecisionRequest) -> dict[str, Any]:
     Unified decision: combines forecast + confidence + warnings + patrol + hotspots
     scoped to the requested zones, plus a deterministic verdict.
     """
-    if body.anchor_ts is not None:
-        anchor_dt = body.anchor_ts
-    else:
-        anchor_dt = datetime.now(timezone.utc).replace(microsecond=0)
-
-    anchor_ts_str = _iso_seconds(anchor_dt) or ""
-    normalized = _normalize(body)
-    normalized["anchor_ts"] = anchor_ts_str
-    cache_key = _cache_key(normalized)
-    request_id = getattr(request.state, "request_id", None) or uuid.uuid4().hex
-
-    resp_cache = get_response_cache()
-    cached = resp_cache.get(cache_key)
-    if cached is not None:
-        out = dict(cached)
-        out["meta"] = {
-            **cached.get("meta", {}),
-            "request_id": request_id,
-            "response_cache": {"status": "hit", "key": cache_key},
-        }
-        return out
-
     engine = get_engine()
     if engine is None:
         raise HTTPException(status_code=503, detail="Database unavailable")
 
-    anchor_naive = anchor_dt.replace(tzinfo=None) if anchor_dt.tzinfo is not None else anchor_dt
-    effective_end = anchor_naive
-    effective_start = effective_end - timedelta(days=DECISION_WINDOW_DAYS)
+    request_id = getattr(request.state, "request_id", None) or uuid.uuid4().hex
+    resp_cache = get_response_cache()
 
     with get_connection() as conn:
         if conn is None:
             raise HTTPException(status_code=503, detail="Database connection failed")
+
+        if body.anchor_ts is not None:
+            anchor_dt = body.anchor_ts
+        else:
+            row = conn.execute(
+                text("SELECT MAX(occurred_at) FROM violations")
+            ).fetchone()
+            data_max = row[0] if row and row[0] else None
+            if data_max is None:
+                raise HTTPException(status_code=422, detail="No violation data found")
+            if not isinstance(data_max, datetime):
+                data_max = datetime.fromisoformat(str(data_max))
+            anchor_dt = data_max.replace(tzinfo=timezone.utc) if data_max.tzinfo is None else data_max
+
+        anchor_ts_str = _iso_seconds(anchor_dt) or ""
+        normalized = _normalize(body)
+        normalized["anchor_ts"] = anchor_ts_str
+        cache_key = _cache_key(normalized)
+
+        cached = resp_cache.get(cache_key)
+        if cached is not None:
+            out = dict(cached)
+            out["meta"] = {
+                **cached.get("meta", {}),
+                "request_id": request_id,
+                "response_cache": {"status": "hit", "key": cache_key},
+            }
+            return out
+
+        anchor_naive = anchor_dt.replace(tzinfo=None) if anchor_dt.tzinfo is not None else anchor_dt
+        effective_end = anchor_naive
+        effective_start = effective_end - timedelta(days=DECISION_WINDOW_DAYS)
 
         baseline_data = get_multi_zone_baseline(
             conn=conn,
